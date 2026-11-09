@@ -24,3 +24,10 @@ variable "budget_amount" {
     error_message = "budget_amount must be a positive whole number."
   }
 }
+
+variable "hf_token" {
+  description = "Hugging Face token. Ephemeral: it is sent to Secret Manager and never stored in state or plan."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}

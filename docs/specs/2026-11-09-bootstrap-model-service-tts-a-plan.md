@@ -1,5 +1,8 @@
 # GCP bootstrap, model-service module, TTS-A Kokoro (CPU): Implementation Plan
 
+> Update: Terraform state now lives in HCP Terraform workspaces, not GCS. The `<project_id>-tfstate` bucket and `backend "gcs"` blocks below are replaced by `cloud {}` blocks. See `infra/bootstrap/README.md`.
+> Update: variable values now come from `.env` as `TF_VAR_*` (see `.envrc`). The `terraform.tfvars` files described below do not exist.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Terraform code for a one-time GCP bootstrap, a shared Cloud Run v2 module, and the first deployment (Kokoro-82M on CPU), ready for the user to apply.

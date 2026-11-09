@@ -3,6 +3,7 @@ mock_provider "google" {}
 variables {
   project_id      = "p"
   billing_account = "000000-000000-000000"
+  hf_token        = "test"
 }
 
 run "enables_apis_needed_by_first_apply" {

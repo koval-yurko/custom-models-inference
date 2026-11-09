@@ -1,7 +1,3 @@
-output "state_bucket" {
-  value = google_storage_bucket.tfstate.name
-}
-
 output "weights_bucket" {
   value = google_storage_bucket.models.name
 }

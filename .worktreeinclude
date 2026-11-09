@@ -1,0 +1,4 @@
+# Git-ignored files that Claude Code copies into every new worktree (gitignore syntax).
+# Only files that are ignored by git are copied.
+.env
+.claude/settings.local.json

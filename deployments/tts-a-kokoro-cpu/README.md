@@ -4,29 +4,32 @@ Kokoro-82M text to speech with the stock image `ghcr.io/remsky/kokoro-fastapi-cp
 
 - Cloud Run service `tts-a-kokoro-cpu` in `europe-west4`, 4 vCPU, 8 GiB, no GPU.
 - The image comes through the bootstrap remote repo `ghcr`. The model weights are inside the image.
-- Scales to zero (min 0, max 1). Private: only `invoker_email` can call it.
+- Scales to zero (min 0, max 1). Private: only `INVOKER_EMAIL` can call it.
 
 ## Prerequisites
 
-1. Apply `infra/bootstrap` first.
-2. Put `project_id` and `invoker_email` (your Google account) in `terraform.tfvars`.
+1. Set up `.env` and direnv as in `infra/bootstrap/README.md` (section "State (HCP Terraform)"). Run the commands below from a shell where direnv has loaded `.env`.
+2. Apply `infra/bootstrap` first.
+3. Put `GCP_PROJECT_ID` and `INVOKER_EMAIL` (your Google account) in `.env`. `.envrc` maps them to Terraform variables.
 
 ## Apply
 
 ```sh
 cd deployments/tts-a-kokoro-cpu
-terraform init -backend-config="bucket=<project_id>-tfstate"
+terraform init
 terraform apply
 ```
 
 ## Test call
+
+The token comes from the service account in `.env`. The service account must be in `invokers` (the module grants `run.invoker` only to the listed members). If the call returns 403, add `serviceAccount:<email>` to `invokers`.
 
 The first call after an idle period starts an instance. It can take 20 to 60 s.
 
 ```sh
 URL=$(terraform output -raw url)
 curl -sS -X POST "$URL/v1/audio/speech" \
-  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token --audiences="$URL")" \
   -H "Content-Type: application/json" \
   -d '{"model":"kokoro","input":"Hello from Cloud Run.","voice":"af_heart","response_format":"mp3"}' \
   -o out.mp3 && file out.mp3
@@ -39,7 +42,7 @@ Expected: `out.mp3: ... MPEG ADTS, layer III` (or `Audio file with ID3`). If the
 Send no requests for about 15 minutes. Then check the instance count:
 
 ```sh
-PROJECT=<project_id>
+PROJECT=$GCP_PROJECT_ID
 START=$(date -u -v-30M +%Y-%m-%dT%H:%M:%SZ)   # Linux: date -u -d '-30 min' +%Y-%m-%dT%H:%M:%SZ
 END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 curl -sS -G "https://monitoring.googleapis.com/v3/projects/$PROJECT/timeSeries" \
@@ -55,7 +58,7 @@ The newest points must show `0` (or the series has no recent points). You can al
 
 ```sh
 terraform destroy
-gcloud run services list --region europe-west4
+gcloud run services list
 ```
 
 `tts-a-kokoro-cpu` must not be in the list.

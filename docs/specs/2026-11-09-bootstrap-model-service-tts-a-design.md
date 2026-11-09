@@ -1,5 +1,8 @@
 # Design: GCP bootstrap, model-service module, TTS-A Kokoro (CPU)
 
+> Update: Terraform state now lives in HCP Terraform workspaces, not GCS. The `<project_id>-tfstate` bucket and `backend "gcs"` blocks below are replaced by `cloud {}` blocks. See `infra/bootstrap/README.md`.
+> Update: variable values now come from `.env` as `TF_VAR_*` (see `.envrc`). The `terraform.tfvars` files described below do not exist.
+
 Date: 2026-11-09. Card: "1. Bootstrap GCP + model-service module + TTS-A Kokoro (CPU)".
 Inputs: `docs/research/01-serverless-inference-on-gcp.md`, `docs/research/03-speech-models.md`.
 

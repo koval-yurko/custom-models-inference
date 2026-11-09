@@ -1,4 +1,6 @@
-# Terraform (keep .terraform.lock.hcl and terraform.tfvars tracked)
+# Terraform (keep .terraform.lock.hcl tracked; variable values come from .env as TF_VAR_*)
+*.tfvars
+*.tfvars.json
 .terraform/
 *.tfstate
 *.tfstate.*
@@ -40,3 +42,7 @@ service-account*.json
 .DS_Store
 .idea/
 .vscode/
+
+custom-models-inference-key.json
+# Project-local gcloud config (see .envrc)
+.gcloud/

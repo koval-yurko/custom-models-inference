@@ -3,7 +3,6 @@
 #   gcloud run jobs execute weights-copy --region <region> --wait \
 #     --update-env-vars HF_REPO=<org/repo>,TARGET_DIR=<folder>
 
-# The token value is not in Terraform state. Add it with: gcloud secrets versions add hf-token --data-file=-
 resource "google_secret_manager_secret" "hf_token" {
   project   = var.project_id
   secret_id = "hf-token"
@@ -13,6 +12,13 @@ resource "google_secret_manager_secret" "hf_token" {
   }
 
   depends_on = [google_project_service.apis]
+}
+
+# Write-only: the token value is not in Terraform state. To rotate it, change HF_TOKEN in .env and raise secret_data_wo_version.
+resource "google_secret_manager_secret_version" "hf_token" {
+  secret                 = google_secret_manager_secret.hf_token.id
+  secret_data_wo         = var.hf_token
+  secret_data_wo_version = 1
 }
 
 resource "google_service_account" "weights_copy" {
