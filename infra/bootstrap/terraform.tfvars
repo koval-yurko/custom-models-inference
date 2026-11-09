@@ -1,4 +1,4 @@
-project_id      = "REPLACE_ME"
-billing_account = "REPLACE_ME"
-# region            = "europe-west4"
-# budget_amount = 20
+project_id      = "custom-models-inference"
+billing_account = "01C897-B07665-C9E033"
+region          = "europe-west4"
+budget_amount   = 5

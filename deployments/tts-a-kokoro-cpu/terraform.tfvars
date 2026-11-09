@@ -1,3 +1,3 @@
-project_id    = "REPLACE_ME"
-invoker_email = "REPLACE_ME@example.com"
-# region      = "europe-west4"
+project_id    = "custom-models-inference"
+invoker_email = "yurk0.k0val4uk@gmail.com"
+region        = "europe-west4"

@@ -40,3 +40,24 @@ run "rejects_non_integer_budget" {
 
   expect_failures = [var.budget_amount]
 }
+
+run "weights_copy_job" {
+  command = plan
+
+  assert {
+    condition     = google_cloud_run_v2_job.weights_copy.template[0].template[0].volumes[0].gcs[0].bucket == "p-models"
+    error_message = "job must mount the weights bucket"
+  }
+  assert {
+    condition     = google_cloud_run_v2_job.weights_copy.template[0].template[0].volumes[0].gcs[0].read_only == false
+    error_message = "job must write to the bucket"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_job.weights_copy.template[0].template[0].containers[0].env : e.value_source[0].secret_key_ref[0].secret if e.name == "HF_TOKEN"]) == "hf-token"
+    error_message = "HF_TOKEN must come from the hf-token secret"
+  }
+  assert {
+    condition     = google_storage_bucket_iam_member.weights_copy.role == "roles/storage.objectAdmin" && google_secret_manager_secret_iam_member.weights_copy.role == "roles/secretmanager.secretAccessor"
+    error_message = "job SA needs objectAdmin on the bucket and secretAccessor on the token"
+  }
+}

@@ -19,3 +19,8 @@ output "ghcr_repo" {
 output "region" {
   value = var.region
 }
+
+output "weights_copy_job" {
+  description = "Cloud Run job that copies a Hugging Face repo into weights_bucket."
+  value       = google_cloud_run_v2_job.weights_copy.name
+}

@@ -39,11 +39,13 @@ Not in scope: models that need more than 1 GPU (Qwen3.8-2.4T-A95B, Mistral Large
 
 ## Recommendation
 
-Status: A and B approved by the user on 2026-11-08. Each one gets its own folder: `deployments/llm-a-gemma4-26b-vllm/` and `deployments/llm-b-qwen35-9b-fastapi/` (see the Terraform layout in `01-serverless-inference-on-gcp.md`).
+Status: A and B approved by the user on 2026-11-08. Each one gets its own folder: `deployments/llm-a-gemma4-12b-vllm/` and `deployments/llm-b-qwen35-9b-fastapi/` (see the Terraform layout in `01-serverless-inference-on-gcp.md`).
 
 Use 2 different architectures and 2 vendors, both on L4. This keeps the cost at about $1 per hour for each running instance. Both scale to zero.
 
 ### A: Regular vLLM -> Gemma 4 26B A4B (QAT w4a16) on L4
+
+Update 2026-11-09: Google publishes no QAT w4a16 checkpoint for 26B A4B. The `-qat-w4a16-ct` format exists only for E2B, E4B, 12B and 31B. The user chose `google/gemma-4-12B-it-qat-w4a16-ct` (dense 12B, 10.3 GB) instead. The deployment is `deployments/llm-a-gemma4-12b-vllm/`. The text below is the original plan.
 
 1. It is a MoE model. Only 3.8B parameters are active, so tokens come fast on an L4.
 2. Google uses this setup on Cloud Run L4 in its own examples, so the risk is low.

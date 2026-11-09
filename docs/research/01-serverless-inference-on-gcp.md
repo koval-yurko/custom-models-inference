@@ -145,9 +145,9 @@ infra/
   modules/
     model-service/        # shared: Cloud Run service (GPU optional) + SA + IAM + GCS volume
 deployments/
-  llm-a-gemma4-26b-vllm/  # A: stock vllm/vllm-openai image, flags only
+  llm-a-gemma4-12b-vllm/  # A: stock vllm/vllm-openai image, flags only
     main.tf               # calls ../../infra/modules/model-service
-    backend.tf            # state prefix = deployments/llm-a-gemma4-26b-vllm
+    backend.tf            # state prefix = deployments/llm-a-gemma4-12b-vllm
     terraform.tfvars      # model path, GPU, args
     README.md             # how to call it, test request
   llm-b-qwen35-9b-fastapi/ # B: custom image with FastAPI + AsyncLLMEngine
@@ -259,7 +259,7 @@ Access: keep services private (no `allUsers` invoker). Call them with an identit
 ## Next cards
 
 1. Bootstrap: GCP project, APIs, Terraform state bucket, Artifact Registry, budget alert.
-2. Terraform module `model-service` + `deployments/llm-a-gemma4-26b-vllm/`.
+2. Terraform module `model-service` + `deployments/llm-a-gemma4-12b-vllm/`.
 3. Model weights bucket + copy job from Hugging Face.
 4. `deployments/llm-b-qwen35-9b-fastapi/` with a custom image.
 5. STT and TTS deployments (see `03-speech-models.md`).

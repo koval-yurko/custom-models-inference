@@ -9,7 +9,9 @@ It creates:
 - the bucket `<project_id>-models` for model weights,
 - the Artifact Registry Docker repo `models` for custom images,
 - the Artifact Registry remote repo `ghcr`, a proxy for `ghcr.io` (Cloud Run cannot pull from `ghcr.io` directly),
-- a monthly billing budget with email alerts at 50%, 90% and 100%. A budget does not stop spend.
+- a monthly billing budget with email alerts at 50%, 90% and 100%. A budget does not stop spend,
+- the Secret Manager secret `hf-token` (no value; add it with `printf '%s' "$HF_TOKEN" | gcloud secrets versions add hf-token --data-file=-`),
+- the Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It has write access to the weights bucket and read access to `hf-token` only.
 
 All resources go in `europe-west4` by default.
 
@@ -51,4 +53,15 @@ Answer `yes`. Then delete the local `terraform.tfstate` and `terraform.tfstate.b
 
 ## Outputs
 
-`state_bucket`, `weights_bucket`, `models_repo`, `ghcr_repo`, `region`. The deployments use `state_bucket` and `ghcr_repo`.
+`state_bucket`, `weights_bucket`, `models_repo`, `ghcr_repo`, `region`, `weights_copy_job`. The deployments use `state_bucket` and `ghcr_repo`.
+
+## Copy model weights
+
+Run the job 1 time per model. Set the repo and the target folder for each execution:
+
+```sh
+gcloud run jobs execute weights-copy --region europe-west4 --wait \
+  --update-env-vars HF_REPO=google/gemma-4-12B-it-qat-w4a16-ct,TARGET_DIR=gemma-4-12b-it-qat-w4a16
+```
+
+The job mounts the bucket with GCS FUSE at `/models` and runs `hf download --local-dir /models/$TARGET_DIR`. The task timeout is 1 hour. A deployment then reads the files at `/models/<TARGET_DIR>`.
