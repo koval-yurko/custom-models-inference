@@ -8,7 +8,7 @@ Kokoro-82M text to speech with the stock image `ghcr.io/remsky/kokoro-fastapi-cp
 
 ## Prerequisites
 
-1. Set up `.env` and direnv as in `infra/bootstrap/README.md` (section "State (HCP Terraform)"). Run the commands below from a shell where direnv has loaded `.env`.
+1. Set up `.env` and direnv as in `infra/bootstrap/README.md` (section "HCP Terraform (state and runs)"). Run the commands below from a shell where direnv has loaded `.env`.
 2. Apply `infra/bootstrap` first.
 3. Put `GCP_PROJECT_ID` and `INVOKER_EMAIL` (your Google account) in `.env`. `.envrc` maps them to Terraform variables.
 
@@ -17,7 +17,7 @@ Kokoro-82M text to speech with the stock image `ghcr.io/remsky/kokoro-fastapi-cp
 ```sh
 cd deployments/tts-a-kokoro-cpu
 terraform init
-terraform apply
+terraform apply   # runs on HCP Terraform; the terminal streams the output
 ```
 
 ## Test call

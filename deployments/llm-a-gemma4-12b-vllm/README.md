@@ -11,7 +11,7 @@ Why not 26B A4B: Google publishes no QAT w4a16 checkpoint for Gemma 4 26B A4B (o
 
 ## Prerequisites
 
-1. Set up `.env` and direnv as in `infra/bootstrap/README.md` (section "State (HCP Terraform)").
+1. Set up `.env` and direnv as in `infra/bootstrap/README.md` (section "HCP Terraform (state and runs)").
 2. Apply `infra/bootstrap` (it creates the weights bucket, the `hf-token` secret with the value of `HF_TOKEN` from `.env`, and the `weights-copy` job).
 3. Check the L4 quota in the region. Cloud Run needs the "without zonal redundancy" L4 quota to be 1 or more:
    ```sh
@@ -36,7 +36,7 @@ Expected: `model.safetensors` (about 10.3 GB), `config.json`, `tokenizer.json` a
 ```sh
 cd deployments/llm-a-gemma4-12b-vllm
 terraform init
-terraform apply
+terraform apply   # runs on HCP Terraform; the terminal streams the output
 ```
 
 The apply waits for the first instance to become ready, so it can take 10 minutes or more.

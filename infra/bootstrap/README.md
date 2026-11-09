@@ -25,15 +25,24 @@ All resources go in `europe-west4` by default. Set `GCP_REGION` in `.env` to cha
 4. The service account needs the Owner role on the project, and Billing Account Costs Manager (or Billing Account Administrator) on the billing account.
 5. Put `GCP_PROJECT_ID` and `BILLING_ACCOUNT` in `.env` (see `.env.example`). `.envrc` maps them to `TF_VAR_project_id` and `TF_VAR_billing_account`. Find the billing account ID with `gcloud billing accounts list`. There is no `terraform.tfvars` file.
 
-## State (HCP Terraform)
+## HCP Terraform (state and runs)
 
-State lives in HCP Terraform, not in the project. Do this once, before the first apply:
+Terraform runs on HCP Terraform (remote execution). HCP stores the state, the variables and the Google credentials. Do this once:
 
 1. Create an HCP Terraform organization and a project (for example `custom-models-inference`).
-2. Copy `.env.example` to `.env` in the repo root and fill it in. Run `direnv allow` once in the repo root. direnv then loads `.env` whenever you enter the folder. The commands in all READMEs assume `.env` is loaded. Check it with `echo $TF_CLOUD_ORGANIZATION`. (Without direnv: `set -a; source .env; set +a` in each shell.)
+2. Copy `.env.example` to `.env` in the repo root and fill it in. Run `direnv allow` once in the repo root. direnv then loads `.env` whenever you enter the folder. Check it with `echo $TF_CLOUD_ORGANIZATION`. (Without direnv: `set -a; source .env; set +a` in each shell.)
    `TF_TOKEN_app_terraform_io` replaces `terraform login`.
-3. Run `terraform init` in each root. It creates the workspace in the project from `TF_CLOUD_PROJECT` if it does not exist.
-4. In each workspace, set Settings > General > Execution Mode to **Local**. A new workspace starts with the organization default, so you can set that default to Local once (Organization settings > Defaults). Terraform then runs on your machine with your GCP credentials, and HCP only stores the state.
+3. Sync `.env` to HCP. The script creates the 3 workspaces in the project, sets remote execution, and writes the variables (including the service account key as the sensitive variable `GOOGLE_CREDENTIALS`):
+   ```sh
+   ./scripts/hcp-sync.py --dry-run   # shows what it will do, no values
+   ./scripts/hcp-sync.py
+   ```
+   Run the script again each time you change `.env`.
+4. Run `terraform init` and `terraform apply` in each root. The plan and apply run on HCP. The terminal shows the output.
+
+**The run does not use your `.env` or your gcloud login.** It uses the workspace variables from step 3. A local `.env` change has no effect until you run the script again.
+
+**What the CLI uploads.** The deployments use the module in `infra/modules/`, so the CLI uploads the whole repo for them (the workspace working directory is `deployments/<name>`). `.terraformignore` keeps `.env`, key files and `.gcloud/` out of the upload. Do not remove it.
 
 The workspace name is in `backend.tf` in each root.
 

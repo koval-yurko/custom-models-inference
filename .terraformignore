@@ -1,0 +1,15 @@
+# HCP Terraform uploads the config directory for remote runs. This file replaces the default list,
+# so keep .git/ and .terraform/ here. Never upload secrets or local files.
+.git/
+.terraform/
+.env
+.env.*
+*-key.json
+service-account*.json
+*.pem
+*.key
+.gcloud/
+.idea/
+.claude/
+.flowly/
+docs/

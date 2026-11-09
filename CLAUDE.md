@@ -8,7 +8,7 @@ Terraform-only infrastructure for serving open-weight models (LLM, TTS, later ST
 
 ## Architecture
 
-Three layers. Each Terraform root has its own HCP Terraform workspace (state), named in its `backend.tf`. Set `TF_CLOUD_ORGANIZATION` in `.env` and keep the workspace Execution Mode on Local.
+Three layers. Each Terraform root has its own HCP Terraform workspace (state), named in its `backend.tf`. Runs are remote (HCP Terraform executes plan and apply). Workspace variables, including the service account key as `GOOGLE_CREDENTIALS`, come from `.env` through `scripts/hcp-sync.py`; run it after every `.env` change. `.terraformignore` keeps secrets out of the config upload.
 
 1. `infra/bootstrap/` — applied once per GCP project. Enables APIs, creates the `<project_id>-models` bucket, Artifact Registry repos (`models`, and `ghcr` as a remote proxy for `ghcr.io` because Cloud Run cannot pull from `ghcr.io`), the budget, the `hf-token` secret, and the `weights-copy` Cloud Run job.
 2. `infra/modules/model-service/` — the shared module. One call = one private Cloud Run service + its service account + `run.invoker` for `invokers` + read-only GCS mount of the weights bucket at `/models`. Public invokers (`allUsers`, `allAuthenticatedUsers`) are rejected by validation. Min instances is always 0. The module sets `deletion_protection = false`.
@@ -18,11 +18,12 @@ Weights flow: Hugging Face → `weights-copy` job (GCS FUSE) → `<project_id>-m
 
 ## Commands
 
-Terraform is the only tool (no tflint, no Makefile, no CI).
+Terraform (remote runs on HCP) and `scripts/hcp-sync.py` are the tools (no tflint, no Makefile, no CI).
 
 ```sh
 terraform fmt -recursive                      # from repo root
 cd infra/bootstrap && terraform init && terraform validate
+./scripts/hcp-sync.py   # .env -> HCP workspaces (--dry-run first)
 cd deployments/<name> && terraform init   # needs .env loaded (direnv): TF_CLOUD_ORGANIZATION and TF_TOKEN_app_terraform_io
 cd deployments/<name> && terraform apply
 ```
@@ -45,8 +46,8 @@ All secrets live in the git-ignored root `.env` (template: `.env.example`). Neve
 | Variable | Used by |
 |---|---|
 | `TF_CLOUD_ORGANIZATION`, `TF_CLOUD_PROJECT`, `TF_TOKEN_app_terraform_io` | Terraform: HCP Terraform state (the token replaces `terraform login`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Terraform: path to the service account key JSON. `.envrc` maps it to `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` for gcloud |
-| `GCP_PROJECT_ID`, `GCP_REGION`, `BILLING_ACCOUNT`, `INVOKER_EMAIL`, `BUDGET_AMOUNT` | `.envrc` exports them as `TF_VAR_project_id`, `TF_VAR_region`, `TF_VAR_billing_account`, `TF_VAR_invoker_email`, `TF_VAR_budget_amount`. It also sets `CLOUDSDK_CORE_PROJECT` and `CLOUDSDK_RUN_REGION`, so gcloud commands need no `--project` or `--region` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to the service account key JSON. `hcp-sync.py` uploads its content as the sensitive HCP variable `GOOGLE_CREDENTIALS` (used by remote runs). `.envrc` maps the path to `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` for local gcloud |
+| `GCP_PROJECT_ID`, `GCP_REGION`, `BILLING_ACCOUNT`, `INVOKER_EMAIL`, `BUDGET_AMOUNT` | `hcp-sync.py` writes them as HCP Terraform variables. `.envrc` also exports them as `TF_VAR_project_id`, `TF_VAR_region`, `TF_VAR_billing_account`, `TF_VAR_invoker_email`, `TF_VAR_budget_amount`. It also sets `CLOUDSDK_CORE_PROJECT` and `CLOUDSDK_RUN_REGION`, so gcloud commands need no `--project` or `--region` |
 | `HF_TOKEN` | `.envrc` exports it as `TF_VAR_hf_token`; bootstrap writes it to the `hf-token` secret (write-only, not in state) |
 
 - `.envrc` (direnv) loads `.env` after a one-time `direnv allow`. It sets `CLOUDSDK_CONFIG=.gcloud/`, so gcloud never uses a global login or config.
