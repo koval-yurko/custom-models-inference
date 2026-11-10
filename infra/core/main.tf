@@ -15,6 +15,8 @@ locals {
     "servicemanagement.googleapis.com",
     "servicecontrol.googleapis.com",
     "apikeys.googleapis.com",
+    # Vertex AI endpoints (infra/modules/vertex-model)
+    "aiplatform.googleapis.com",
   ]
 }
 
@@ -69,6 +71,26 @@ resource "google_artifact_registry_repository" "ghcr" {
       custom_repository {
         uri = "https://ghcr.io"
       }
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# Vertex AI pulls images only from Artifact Registry; this remote repo proxies Docker Hub.
+resource "google_artifact_registry_repository" "dockerhub" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "dockerhub"
+  format        = "DOCKER"
+  mode          = "REMOTE_REPOSITORY"
+  description   = "Proxy for Docker Hub."
+
+  remote_repository_config {
+    description = "Docker Hub"
+
+    docker_repository {
+      public_repository = "DOCKER_HUB"
     }
   }
 

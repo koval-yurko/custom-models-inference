@@ -63,3 +63,16 @@ run "weights_copy_job" {
     error_message = "job SA needs objectAdmin on the bucket and secretAccessor on the token"
   }
 }
+
+run "vertex_ai_foundation" {
+  command = plan
+
+  assert {
+    condition     = contains(keys(google_project_service.apis), "aiplatform.googleapis.com")
+    error_message = "Vertex AI deployments need the Vertex AI API"
+  }
+  assert {
+    condition     = google_artifact_registry_repository.dockerhub.remote_repository_config[0].docker_repository[0].public_repository == "DOCKER_HUB"
+    error_message = "Vertex AI pulls only from Artifact Registry, so Docker Hub needs a proxy repo"
+  }
+}

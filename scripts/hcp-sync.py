@@ -44,6 +44,7 @@ WORKSPACES = {
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
     "custom-models-llm-a-gemma4-12b-vllm": ("deployments/llm-a-gemma4-12b-vllm", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
+    "custom-models-llm-a-gemma4-12b-vllm-vertex": ("deployments/llm-a-gemma4-12b-vllm-vertex", COMMON),
 }
 SENSITIVE = {"hf_token", "GOOGLE_CREDENTIALS"}
 

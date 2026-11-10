@@ -1,11 +1,12 @@
 # Infrastructure
 
-`infra/` has 2 folders and this README:
+`infra/` has 3 folders and this README:
 
 | Folder | Content |
 |---|---|
 | `core/` | One Terraform root with one apply. It prepares one GCP project for all deployments under `deployments/`. |
-| `modules/model-service/` | The shared module. Each deployment calls it. |
+| `modules/model-service/` | The Cloud Run module. Each Cloud Run deployment calls it. |
+| `modules/vertex-model/` | The Vertex AI module. Each Vertex AI deployment calls it. |
 
 Contents:
 
@@ -16,14 +17,16 @@ Contents:
 5. [Copy model weights](#copy-model-weights)
 6. [API Gateway and API keys](#api-gateway-and-api-keys)
 7. [Module: model-service](#module-model-service)
-8. [Tests](#tests)
+8. [Module: vertex-model](#module-vertex-model)
+9. [Tests](#tests)
 
 ## What core creates
 
-- The APIs: run, artifactregistry, cloudbuild, secretmanager, storage, compute, billingbudgets, iam, cloudresourcemanager, serviceusage, apigateway, servicemanagement, servicecontrol, apikeys.
+- The APIs: run, artifactregistry, cloudbuild, secretmanager, storage, compute, billingbudgets, iam, cloudresourcemanager, serviceusage, apigateway, servicemanagement, servicecontrol, apikeys, aiplatform (Vertex AI).
 - The bucket `<project_id>-models` for model weights.
 - The Artifact Registry Docker repo `models` for custom images.
 - The Artifact Registry remote repo `ghcr`, a proxy for `ghcr.io`. Cloud Run cannot pull from `ghcr.io` directly.
+- The Artifact Registry remote repo `dockerhub`, a proxy for Docker Hub. Vertex AI pulls images only from Artifact Registry.
 - A monthly billing budget with email alerts at 50%, 90% and 100%. A budget does not stop spend.
 - The Secret Manager secret `hf-token` and its value, taken from `HF_TOKEN` in `.env`. The value is write-only: it is not in the Terraform state. To rotate it, change `HF_TOKEN` and raise `secret_data_wo_version` in `weights_copy.tf`.
 - The Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It can write to the weights bucket and read `hf-token`, and nothing more.
@@ -77,7 +80,20 @@ terraform init
 terraform apply
 ```
 
-Outputs: `weights_bucket`, `models_repo`, `ghcr_repo`, `region`, `weights_copy_job`, `gateway_apis` and `api_key` (sensitive). The deployments use `ghcr_repo`.
+Outputs: `weights_bucket`, `models_repo`, `ghcr_repo`, `dockerhub_repo`, `region`, `weights_copy_job`, `gateway_apis` and `api_key` (sensitive). Cloud Run deployments use `ghcr_repo`. Vertex AI deployments use `dockerhub_repo` for stock images, for example `<dockerhub_repo>/vllm/vllm-openai:v0.33.0`.
+
+### Vertex AI GPU quota (check before the first Vertex AI deployment)
+
+A Vertex AI endpoint with 1 `NVIDIA_L4` on `g2-standard-8` needs the quota "Custom model serving Nvidia L4 GPUs per region" in `europe-west4`. Prediction quota is separate from Compute Engine and Cloud Run GPU quota.
+
+1. Apply `infra/core/` first. It turns on `aiplatform.googleapis.com`.
+2. Open the console: IAM & Admin > Quotas & System Limits. Filter for `Service: Vertex AI API` and `L4`. Read the value for `region: europe-west4`.
+3. Or use the CLI. This needs the Cloud Quotas API (`gcloud services enable cloudquotas.googleapis.com`) and the gcloud `beta` component:
+   ```sh
+   gcloud beta quotas info list --service=aiplatform.googleapis.com --format=json \
+     | jq -r '.[] | select(.quotaId | test("L4")) | .quotaId as $q | .dimensionsInfos[] | select(.dimensions.region == "europe-west4") | "\($q) \(.details.value)"'
+   ```
+4. If the value is 0, request 1 GPU on the same console page. Scale to zero reserves quota for `max_replica_count`.
 
 ## Copy model weights
 
@@ -179,6 +195,8 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 7. Apply the deployment. If you need streaming, run `./scripts/gateway-streaming.py deployments/<name>`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
 
+Vertex AI deployments: step 4 is different. There is no `invokers` list. `gateway.tf` gives the gateway service account `roles/aiplatform.user` on the project, and the backend is the `:rawPredict` URL of the endpoint (`path_translation = "CONSTANT_ADDRESS"`). See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`. Not verified: Vertex AI may reject the ID token that the gateway sends.
+
 To remove a gateway, destroy the deployment first. Then remove the name from `local.gateway_apis` and apply `infra/core/`.
 
 ### Gateway in another GCP project
@@ -232,6 +250,174 @@ module "service" {
 }
 ```
 
+## Module: vertex-model
+
+Deploys 1 model in a custom container to 1 private, dedicated Vertex AI endpoint. The deployment scales to zero (min 0 replicas, Preview). It is the Vertex AI version of `model-service`. Use 1 call of this module in each `deployments/<name>/` folder. Do not put a list of models in one root.
+
+Terraform creates:
+
+- a service account for the deployed model,
+- `roles/storage.objectViewer` on `weights_bucket` for that service account, if you set one,
+- a dedicated Vertex AI endpoint (own DNS, no 1.5 MB body limit of the shared endpoint, needed for `:invoke`).
+
+`modules/vertex-model/vertex.sh` does the model upload and the deploy through the Vertex AI REST API (`v1beta1`). Terraform only renders the request bodies (output `vertex`).
+
+### Deploy method: Terraform plus 1 script step
+
+Provider `google ~> 8.10` (checked on 8.10.0) has no resource for a custom-container model upload, and no resource for a deployed model on an existing endpoint.
+
+`google_vertex_ai_endpoint_with_model_garden_deployment` accepts `model_config.container_spec.image_uri`. It does not fit:
+
+- It needs `publisher_model_name` or `hugging_face_model_id`. It deploys a Model Garden or Hugging Face model, not a model from our weights bucket.
+- It has no `artifact_uri`, so the container gets no `AIP_STORAGE_URI`.
+- It has no `scaleToZeroSpec`, so the idle time stays at the 1 hour default.
+- It has no service account and no `invokeRoutePrefix`.
+
+GA `gcloud ai` (SDK 545) has no flags for the idle time, the dedicated endpoint or `invokeRoutePrefix`. So the script calls the REST API with `curl`. HCP Terraform runs have no gcloud login, so the step runs on your machine after `terraform apply`.
+
+### Steps
+
+The deployment root must pass the module output through:
+
+```hcl
+output "vertex" {
+  value = module.model.vertex
+}
+```
+
+1. Apply. HCP Terraform creates the endpoint and the service account.
+   ```sh
+   cd deployments/<name> && terraform apply
+   ```
+2. Upload and deploy. The script waits for both operations (the deploy can take 30 minutes).
+   ```sh
+   direnv exec . ../../infra/modules/vertex-model/vertex.sh deploy
+   ```
+3. Remove. Undeploy first: Vertex AI does not delete an endpoint that has a deployed model. The script also deletes the uploaded model, and a model that a failed deploy left behind.
+   ```sh
+   direnv exec . ../../infra/modules/vertex-model/vertex.sh undeploy
+   terraform destroy
+   ```
+
+To change the image, args or machine: run `undeploy`, then `terraform apply`, then `deploy`. `deploy` stops if the endpoint already has a model.
+
+The script needs `terraform`, `gcloud`, `curl` and `jq`.
+
+### Routes
+
+The container must follow the Vertex serving contract:
+
+- It listens on `0.0.0.0:$AIP_HTTP_PORT` (`port`, default 8080).
+- `health_route` (default `/health`) returns 200 when the model is ready.
+- Set exactly 1 of `predict_route` or `invoke_routes = true`.
+
+Base URL: `DNS=$(terraform output -raw endpoint_dns)`, then `$DNS/v1/projects/<project_id>/locations/<region>/endpoints/<endpoint_id>`. Auth: `-H "Authorization: Bearer $(gcloud auth print-access-token)"`.
+
+| Mode | Call | Goes to |
+|---|---|---|
+| `predict_route = "/v1/chat/completions"` | `POST <base>:rawPredict` | `predict_route`, body unchanged. Use this for OpenAI JSON. |
+| `predict_route = ...` | `POST <base>:predict` with `{"instances": [...]}` | `predict_route`. The response must be `{"predictions": [...]}`. |
+| `invoke_routes = true` (Preview) | `POST <base>/invoke/<path>` | `/<path>`, for example `/invoke/v1/chat/completions` to `/v1/chat/completions`. `:predict` and `:rawPredict` are off. HTTP only. |
+
+After you enable a dedicated endpoint, the shared DNS (`<region>-aiplatform.googleapis.com`) does not accept predict calls for it.
+
+### Retry rule for HTTP 429 (scale to zero)
+
+The deployment has `minReplicaCount = 0`, `initialReplicaCount = 1` and `scaleToZeroSpec`. After `idle_scaledown_period` (default 300s, the minimum) without traffic, it scales to 0. `min_scaleup_period` (default 300s) is the time after a scale up before Vertex AI checks for a scale down.
+
+**Rule: when a call returns HTTP 429, the client must wait and send the same request again.**
+
+1. At 0 replicas, the first request starts the scale up. Vertex AI drops that request and returns HTTP 429 ("Model is not yet ready for inference").
+2. Retry every 30 s. Use a total limit of 30 minutes. A GPU node start plus the model load takes minutes, not seconds.
+3. Retry only on 429. Do not retry other 4xx codes.
+4. Treat the first 200 after a 429 as the end of the cold start. Write down the time in the deployment README.
+
+Example:
+
+```sh
+for i in $(seq 1 60); do
+  code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST "$URL" \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -d @body.json)
+  [ "$code" != 429 ] && break
+  sleep 30
+done
+echo "$code"; cat /tmp/out.json
+```
+
+Other limits of scale to zero (Preview): 1 model per endpoint, no multi-host GPU, quota is reserved for `max_replica_count`, and Vertex AI undeploys a deployment that stays at 0 for more than 30 days. Billing is per node-hour while a replica runs, so each test session bills at least `min_scaleup_period` plus `idle_scaledown_period`.
+
+### Weights flow
+
+Hugging Face → `weights-copy` job → `gs://<project_id>-models/<weights_dir>/` → model `artifactUri` → `$AIP_STORAGE_URI` in the container.
+
+There is no `/models` mount on Vertex AI. The container loads the weights itself from `$AIP_STORAGE_URI`. Vertex AI can point `AIP_STORAGE_URI` to its own copy of `artifactUri`. So always read `$AIP_STORAGE_URI`, not the bucket path. `weights_dir` must match the `TARGET_DIR` of the weights job.
+
+Selected method: **vLLM streams the weights from GCS** with `--load-format runai_streamer`. There is no copy step and no custom image:
+
+```hcl
+args = ["--model=$(AIP_STORAGE_URI)", "--load-format=runai_streamer", "--host=0.0.0.0", "--port=8080"]
+```
+
+Vertex AI expands `$(VAR)` in `args`. The service account reads the weights bucket (`roles/storage.objectViewer`).
+
+Fallback: if the pinned vLLM cannot read `gs://` with `runai_streamer`, use a custom image with an entrypoint that copies at start (`gcloud storage cp -r "$AIP_STORAGE_URI*" /tmp/model`) and then starts vLLM with `--model=/tmp/model`. The copy adds the full download time to each cold start.
+
+Do not set an `AIP_` variable yourself (validation rejects it).
+
+### Access
+
+The endpoint is private. The module grants no access. A caller needs `aiplatform.endpoints.predict` on the project, for example `roles/aiplatform.user`. Vertex AI has no per-endpoint IAM binding in the provider, and a project-level binding in each deployment root would be removed for all deployments when 1 root is destroyed. Grant the role once, outside the deployments. The project owner already has it. There is no VPC peering and no Private Service Connect; the Vertex AI DNS checks IAM on each call.
+
+### Inputs
+
+| Variable | Default | Note |
+|---|---|---|
+| `project_id`, `region`, `name`, `image` | required | `name`: 6-49 chars, lowercase letters, digits, hyphens. The endpoint ID is a number derived from `name`. `image` must be in Artifact Registry: use the core `dockerhub_repo` or `ghcr_repo` proxy for stock images. |
+| `predict_route` / `invoke_routes` | `null` / `false` | Set exactly 1. |
+| `health_route`, `port` | `"/health"`, `8080` | |
+| `args`, `env` | `[]`, `{}` | No secrets. No `AIP_` keys. |
+| `machine_type`, `accelerator_type`, `accelerator_count` | `"g2-standard-8"`, `"NVIDIA_L4"`, `1` | `accelerator_type = null` for CPU only. |
+| `shared_memory_size_mb` | `null` | vLLM: `16384`. |
+| `deployment_timeout` | `"1800s"` | Time to start and pass the health check. |
+| `max_replica_count` | `1` | Min is always 0. |
+| `idle_scaledown_period`, `min_scaleup_period` | `"300s"`, `"300s"` | 300s to 28800s. |
+| `weights_bucket`, `weights_dir` | `null` | `weights_dir` needs `weights_bucket`. |
+
+### Outputs
+
+`endpoint_id`, `endpoint_dns`, `service_account_email`, `vertex` (input for `vertex.sh`).
+
+### Example
+
+```hcl
+module "model" {
+  source = "../../infra/modules/vertex-model"
+
+  project_id            = var.project_id
+  region                = var.region
+  name                  = "llm-a-gemma4-12b-vllm-vertex"
+  image                 = "europe-west4-docker.pkg.dev/${var.project_id}/dockerhub/vllm/vllm-openai:v0.33.0"
+  args                  = ["--model=$(AIP_STORAGE_URI)", "--load-format=runai_streamer", "--host=0.0.0.0", "--port=8080"]
+  predict_route         = "/v1/chat/completions"
+  shared_memory_size_mb = 16384
+  weights_bucket        = "${var.project_id}-models"
+  weights_dir           = "gemma-4-12b-it-qat-w4a16"
+}
+
+output "vertex" {
+  value = module.model.vertex
+}
+```
+
+### Not verified against real GCP
+
+The first deployment card (LLM-A on Vertex AI) checks these:
+
+1. vLLM `runai_streamer` reads `gs://` in the pinned image (research open question 5).
+2. Vertex AI expands `$(AIP_STORAGE_URI)` in `args`, and the service account can read the URI that Vertex AI sets.
+3. `invokeRoutePrefix` sits in `containerSpec` in `v1beta1`, and the `<base>/invoke/<path>` URL form.
+4. The L4 quota for Vertex AI prediction in `europe-west4` (see [Vertex AI GPU quota](#vertex-ai-gpu-quota-check-before-the-first-vertex-ai-deployment)).
+
 ## Tests
 
 The tests use mock providers. They need no GCP credentials.
@@ -239,5 +425,7 @@ The tests use mock providers. They need no GCP credentials.
 ```sh
 cd infra/core && terraform init -backend=false && terraform test                             # core
 cd infra/modules/model-service && terraform init -backend=false && terraform test            # module
+cd infra/modules/vertex-model && terraform init -backend=false && terraform test             # Vertex AI module
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
+cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 ```

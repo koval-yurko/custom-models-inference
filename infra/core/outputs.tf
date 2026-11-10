@@ -12,6 +12,11 @@ output "ghcr_repo" {
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ghcr.repository_id}"
 }
 
+output "dockerhub_repo" {
+  description = "Image URL prefix that proxies Docker Hub, for example <dockerhub_repo>/vllm/vllm-openai:v0.33.0. Vertex AI needs it."
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.dockerhub.repository_id}"
+}
+
 output "region" {
   value = var.region
 }

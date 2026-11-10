@@ -7,6 +7,7 @@ locals {
   # Add a line here and apply this root before you apply the new deployment.
   gateway_apis = [
     "tts-a-kokoro-cpu",
+    "llm-a-gemma4-vertex",
   ]
 }
 
