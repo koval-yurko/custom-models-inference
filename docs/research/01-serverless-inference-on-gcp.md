@@ -24,6 +24,8 @@ Date: 2026-11-08. Card: "Project setup".
 
 ## Recommendation
 
+Update 2026-11-10: the user moved all models except TTS-A to Vertex AI. See `04-vertex-ai.md`. The text below is the original recommendation.
+
 Use **Cloud Run services with GPU** as the main platform.
 
 1. It is the only option with GA scale to zero and per-second billing.
@@ -257,6 +259,8 @@ Access: keep services private (no `allUsers` invoker). Call them with an identit
 5. Do you need streaming (LLM tokens, live STT), or only request and response?
 
 ## Next cards
+
+Update 2026-11-10: the current card list is in `04-vertex-ai.md`.
 
 1. Bootstrap: GCP project, APIs, Terraform state bucket, Artifact Registry, budget alert.
 2. Terraform module `model-service` + `deployments/llm-a-gemma4-12b-vllm/`.

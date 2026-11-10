@@ -8,11 +8,11 @@ Terraform-only infrastructure for serving open-weight models (LLM, TTS, later ST
 
 ## Architecture
 
-Three layers. Each Terraform root has its own HCP Terraform workspace (state), named in its `backend.tf`. Runs are remote (HCP Terraform executes plan and apply). Workspace variables, including the service account key as `GOOGLE_CREDENTIALS`, come from `.env` through `scripts/hcp-sync.py`; run it after every `.env` change. `.terraformignore` keeps secrets out of the config upload.
+Two layers. Each Terraform root has its own HCP Terraform workspace (state), named in its `backend.tf`. Runs are remote (HCP Terraform executes plan and apply). Workspace variables, including the service account key as `GOOGLE_CREDENTIALS`, come from `.env` through `scripts/hcp-sync.py`; run it after every `.env` change. `.terraformignore` keeps secrets out of the config upload. All infra docs are in one file: `infra/README.md`.
 
-1. `infra/bootstrap/` — applied once per GCP project. Enables APIs, creates the `<project_id>-models` bucket, Artifact Registry repos (`models`, and `ghcr` as a remote proxy for `ghcr.io` because Cloud Run cannot pull from `ghcr.io`), the budget, the `hf-token` secret, and the `weights-copy` Cloud Run job.
-2. `infra/modules/model-service/` — the shared module. One call = one private Cloud Run service + its service account + `run.invoker` for `invokers` + read-only GCS mount of the weights bucket at `/models`. Public invokers (`allUsers`, `allAuthenticatedUsers`) are rejected by validation. Min instances is always 0. The module sets `deletion_protection = false`.
-3. `deployments/<name>/` — one folder and one state per model (convention: never list several models in one root). Each calls the module with a pinned stock image plus flags/env. 
+1. `infra/core/` — one root, one apply, once per GCP project (workspace `custom-models-bootstrap`, the old name, kept for the state). Enables APIs, creates the `<project_id>-models` bucket, Artifact Registry repos (`models`, and `ghcr` as a remote proxy for `ghcr.io` because Cloud Run cannot pull from `ghcr.io`), the budget, the `hf-token` secret, the `weights-copy` Cloud Run job (`weights_copy.tf`), and in `gateways.tf` one API Gateway API per name in `local.gateway_apis` plus one shared API key restricted to those APIs.
+   - `infra/modules/model-service/` — the shared module. One call = one private Cloud Run service + its service account + `run.invoker` for `invokers` + read-only GCS mount of the weights bucket at `/models`. Public invokers (`allUsers`, `allAuthenticatedUsers`) are rejected by validation. Min instances is always 0. The module sets `deletion_protection = false`.
+2. `deployments/<name>/` — one folder and one state per model (convention: never list several models in one root). Each calls the module with a pinned stock image plus flags/env. A deployment can add a public API Gateway (`gateway.tf`: gateway SA, OpenAPI spec with `x-api-key`, API config, gateway) on the API that `infra/core/gateways.tf` creates with the same ID. Apply `infra/core/` first. Streaming on the gateway needs the post-apply script `scripts/gateway-streaming.py`, because the provider cannot set it.
 
 Weights flow: Hugging Face → `weights-copy` job (GCS FUSE) → `<project_id>-models/<TARGET_DIR>/` → mounted at `/models` in the service, with `HF_HUB_OFFLINE=1`. `local.model_dir` in a deployment must match the job's `TARGET_DIR`.
 
@@ -22,7 +22,7 @@ Terraform (remote runs on HCP) and `scripts/hcp-sync.py` are the tools (no tflin
 
 ```sh
 terraform fmt -recursive                      # from repo root
-cd infra/bootstrap && terraform init && terraform validate
+cd infra/core && terraform init && terraform validate
 ./scripts/hcp-sync.py   # .env -> HCP workspaces (--dry-run first)
 cd deployments/<name> && terraform init   # needs .env loaded (direnv): TF_CLOUD_ORGANIZATION and TF_TOKEN_app_terraform_io
 cd deployments/<name> && terraform apply
@@ -31,7 +31,7 @@ cd deployments/<name> && terraform apply
 Tests use a mock provider and need no GCP credentials. Run from the directory that has the `tests/` folder:
 
 ```sh
-cd infra/modules/model-service   # or infra/bootstrap
+cd infra/modules/model-service   # or infra/core, or deployments/tts-a-kokoro-cpu
 terraform init -backend=false
 terraform test                                   # all tests
 terraform test -filter=tests/model_service.tftest.hcl   # one file
@@ -48,7 +48,7 @@ All secrets live in the git-ignored root `.env` (template: `.env.example`). Neve
 | `TF_CLOUD_ORGANIZATION`, `TF_CLOUD_PROJECT`, `TF_TOKEN_app_terraform_io` | Terraform: HCP Terraform state (the token replaces `terraform login`) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to the service account key JSON. `hcp-sync.py` uploads its content as the sensitive HCP variable `GOOGLE_CREDENTIALS` (used by remote runs). `.envrc` maps the path to `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` for local gcloud |
 | `GCP_PROJECT_ID`, `GCP_REGION`, `BILLING_ACCOUNT`, `INVOKER_EMAIL`, `BUDGET_AMOUNT` | `hcp-sync.py` writes them as HCP Terraform variables. `.envrc` also exports them as `TF_VAR_project_id`, `TF_VAR_region`, `TF_VAR_billing_account`, `TF_VAR_invoker_email`, `TF_VAR_budget_amount`. It also sets `CLOUDSDK_CORE_PROJECT` and `CLOUDSDK_RUN_REGION`, so gcloud commands need no `--project` or `--region` |
-| `HF_TOKEN` | `.envrc` exports it as `TF_VAR_hf_token`; bootstrap writes it to the `hf-token` secret (write-only, not in state) |
+| `HF_TOKEN` | `.envrc` exports it as `TF_VAR_hf_token`; infra/core writes it to the `hf-token` secret (write-only, not in state) |
 
 - `.envrc` (direnv) loads `.env` after a one-time `direnv allow`. It sets `CLOUDSDK_CONFIG=.gcloud/`, so gcloud never uses a global login or config.
 - Agent shells do not run the direnv hook. Run `direnv exec . terraform ...` and `direnv exec . gcloud ...`.

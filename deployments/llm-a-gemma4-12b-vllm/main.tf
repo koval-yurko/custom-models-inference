@@ -15,7 +15,7 @@ provider "google" {
 }
 
 locals {
-  # Folder in the weights bucket, filled by the bootstrap weights-copy job from google/gemma-4-12B-it-qat-w4a16-ct.
+  # Folder in the weights bucket, filled by the infra/core weights-copy job from google/gemma-4-12B-it-qat-w4a16-ct.
   model_dir = "gemma-4-12b-it-qat-w4a16"
 }
 

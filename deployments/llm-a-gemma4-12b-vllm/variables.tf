@@ -1,10 +1,10 @@
 variable "project_id" {
-  description = "GCP project ID (the bootstrap project)."
+  description = "GCP project ID (the infra/core project)."
   type        = string
 }
 
 variable "region" {
-  description = "Region. Must match the bootstrap region."
+  description = "Region. Must match the infra/core region."
   type        = string
   default     = "europe-west4"
 }

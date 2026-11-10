@@ -10,6 +10,11 @@ locals {
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "serviceusage.googleapis.com",
+    # API Gateway with API keys (gateways.tf)
+    "apigateway.googleapis.com",
+    "servicemanagement.googleapis.com",
+    "servicecontrol.googleapis.com",
+    "apikeys.googleapis.com",
   ]
 }
 

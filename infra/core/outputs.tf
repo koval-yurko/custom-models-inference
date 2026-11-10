@@ -20,3 +20,14 @@ output "weights_copy_job" {
   description = "Cloud Run job that copies a Hugging Face repo into weights_bucket."
   value       = google_cloud_run_v2_job.weights_copy.name
 }
+
+output "gateway_apis" {
+  description = "Gateway API ID -> managed service. A deployment with the same API ID adds its gateway to it."
+  value       = { for k, v in google_api_gateway_api.this : k => v.managed_service }
+}
+
+output "api_key" {
+  description = "Shared API key for the x-api-key header of all model gateways. It is in the state."
+  value       = one(google_apikeys_key.gateways[*].key_string)
+  sensitive   = true
+}
