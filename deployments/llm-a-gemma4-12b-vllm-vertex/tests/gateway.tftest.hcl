@@ -17,8 +17,12 @@ run "gateway_requires_api_key" {
     error_message = "the API key must come from the x-api-key header"
   }
   assert {
-    condition     = alltrue(flatten([for p in values(local.openapi.paths) : [for op in values(p) : !contains(keys(op), "security")]]))
-    error_message = "no operation may override the global security"
+    condition     = alltrue(flatten([for p in values(local.openapi.paths) : [for m, op in p : m == "options" || !contains(keys(op), "security")]]))
+    error_message = "only the OPTIONS (CORS preflight) operations may override the global security"
+  }
+  assert {
+    condition     = alltrue([for p in values(local.openapi.paths) : p.options.security == []])
+    error_message = "every path needs an OPTIONS operation without the API key, for the browser CORS preflight"
   }
   assert {
     condition     = keys(local.openapi.paths) == ["/v1/chat/completions"]

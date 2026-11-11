@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Terraform-only infrastructure for serving open-weight models (LLM, TTS, later STT) as private, scale-to-zero Cloud Run v2 services on GCP (`europe-west4`). There is no application code. Research and design decisions are in `docs/research/` and `docs/specs/` (design + plan files, dated). Read the relevant spec before changing behaviour.
+Terraform-only infrastructure for serving open-weight models (LLM, TTS, later STT) as private, scale-to-zero Cloud Run v2 services on GCP (`europe-west4`). The only application code is the static test UI in `ui/` (React + Vite, see below). Research and design decisions are in `docs/research/` and `docs/specs/` (design + plan files, dated). Read the relevant spec before changing behaviour.
 
 ## Architecture
 
@@ -37,6 +37,8 @@ terraform init -backend=false
 terraform test                                   # all tests
 terraform test -filter=tests/model_service.tftest.hcl   # one file
 ```
+
+Test UI (`ui/`, design: `docs/specs/2026-11-11-test-ui-design.md`). Static React app in the public bucket `<project_id>-ui`, one tab per model. Tabs come from the `ui` Terraform output of each deployment through `scripts/ui-deploy.py` (writes `models.json`). To add or change a model in the UI, use the `model-ui` skill. Checks: `cd ui && npm install && npm test && npm run build`. Local: `npm run mock` plus `npm run dev` (see the skill).
 
 Run the weights copy job: `gcloud run jobs execute weights-copy --wait --update-env-vars HF_REPO=<org/repo>,TARGET_DIR=<folder>`.
 

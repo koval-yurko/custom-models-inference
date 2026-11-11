@@ -1,0 +1,5 @@
+{"models":[
+ {"id":"tts-mock","title":"TTS mock","type":"tts","base_url":"http://localhost:5181","model":"kokoro","features":{"stream":true,"voices":true,"default_voice":"af_heart","formats":["mp3","wav","pcm"],"sample_rate":24000}},
+ {"id":"llm-mock","title":"LLM mock","type":"llm","base_url":"http://localhost:5181","model":"gemma-4-12b","features":{"stream":true,"max_tokens":1024,"cold_start":"vertex-429"}},
+ {"id":"stt-mock","title":"STT mock","type":"stt","base_url":"http://localhost:5181","model":"whisper","features":{}}
+]}

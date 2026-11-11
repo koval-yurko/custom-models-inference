@@ -36,3 +36,13 @@ output "api_key" {
   value       = one(google_apikeys_key.gateways[*].key_string)
   sensitive   = true
 }
+
+output "ui_bucket" {
+  description = "Bucket of the static test UI. scripts/ui-deploy.py uploads to it."
+  value       = google_storage_bucket.ui.name
+}
+
+output "ui_url" {
+  description = "Public URL of the test UI."
+  value       = "https://storage.googleapis.com/${google_storage_bucket.ui.name}/index.html"
+}

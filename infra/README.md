@@ -18,7 +18,8 @@ Contents:
 6. [API Gateway and API keys](#api-gateway-and-api-keys)
 7. [Module: model-service](#module-model-service)
 8. [Module: vertex-model](#module-vertex-model)
-9. [Tests](#tests)
+9. [Test UI](#test-ui)
+10. [Tests](#tests)
 
 ## What core creates
 
@@ -32,6 +33,7 @@ Contents:
 - The Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It can write to the weights bucket and read `hf-token`, and nothing more.
 - One API Gateway API for each entry in `local.gateway_apis` (`gateways.tf`), and a placeholder API config. A managed service can be enabled only after its API has a config, so the placeholder comes first, then the enabled service, then the key. No gateway uses the placeholder.
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
+- The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
 All resources go in `europe-west4` by default. Set `GCP_REGION` in `.env` to change it.
 
@@ -40,6 +42,7 @@ All resources go in `europe-west4` by default. Set `GCP_REGION` in `.env` to cha
 | `main.tf` | APIs, buckets, Artifact Registry repos, budget |
 | `weights_copy.tf` | `hf-token` secret and `weights-copy` job |
 | `gateways.tf` | Gateway APIs and the shared API key |
+| `ui.tf` | Public bucket of the test UI |
 
 ## First setup
 
@@ -180,7 +183,7 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 2. Apply `infra/core/`. It creates the API, a placeholder config and the enabled managed service, and adds the service to the key restrictions. The key string does not change.
 3. Copy `deployments/tts-a-kokoro-cpu/gateway.tf` to the new deployment. Then change these values:
    - `local.gateway_id`: the same name as in step 1. The name must be 49 characters or less. The gateway service account ID is `<gateway_id>-gw`, so keep the name 27 characters or less.
-   - `local.openapi.paths`: only the paths that clients need. Give each operation a unique `operationId`. Do not add `security` to an operation: the global `security` must apply to all paths.
+   - `local.openapi.paths`: only the paths that clients need. Give each operation a unique `operationId`. Do not add `security` to an operation: the global `security` must apply to all paths. The only exception: each path also gets an `options` operation with `security = []`, for the CORS preflight of the test UI (see [Test UI](#test-ui)).
    - `deadline`: not longer than the Cloud Run `timeout` of the module call.
 4. In the deployment `main.tf`:
    - Add the `google-beta` provider (in `required_providers` and as a `provider` block).
@@ -194,6 +197,7 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 6. Copy `tests/gateway.tftest.hcl` and run `terraform init -backend=false && terraform test`.
 7. Apply the deployment. If you need streaming, run `./scripts/gateway-streaming.py deployments/<name>`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
+9. Add the `ui` output and run `./scripts/ui-deploy.py`. Follow the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
 Vertex AI deployments: step 4 is different. There is no `invokers` list. `gateway.tf` gives the gateway service account `roles/aiplatform.user` on the project, and the backend is the `:rawPredict` URL of the endpoint (`path_translation = "CONSTANT_ADDRESS"`). See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`. Not verified: Vertex AI may reject the ID token that the gateway sends.
 
@@ -418,6 +422,32 @@ The first deployment card (LLM-A on Vertex AI) checks these:
 3. `invokeRoutePrefix` sits in `containerSpec` in `v1beta1`, and the `<base>/invoke/<path>` URL form.
 4. The L4 quota for Vertex AI prediction in `europe-west4` (see [Vertex AI GPU quota](#vertex-ai-gpu-quota-check-before-the-first-vertex-ai-deployment)).
 
+## Test UI
+
+A static React app (`ui/`) to test the models in a browser, also on a phone. It has 1 tab for each model. There is no backend: the browser calls the API Gateways with the shared API key. The key stays in the `localStorage` of the browser.
+
+- URL: `terraform -chdir=infra/core output -raw ui_url` (`https://storage.googleapis.com/<project_id>-ui/index.html`).
+- Tabs come from `models.json`. `scripts/ui-deploy.py` writes it from the `ui` output of each deployment. A deployment shows in the UI only after it is applied with a `ui` output.
+- The gateway URL changes when Terraform or `scripts/gateway-streaming.py` replaces the gateway. Then run `./scripts/ui-deploy.py --config-only`.
+- To add a model, a feature or a new model type, use the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
+
+```sh
+./scripts/ui-deploy.py                # models.json + build + upload all
+./scripts/ui-deploy.py --config-only  # only models.json (after a gateway URL change)
+./scripts/ui-deploy.py --local        # models.json in ui/public, for npm run dev
+```
+
+CORS: the browser sends a preflight `OPTIONS` request before each call, because of the `x-api-key` header. The preflight has no key. So each gateway path has an `options` operation with `security = []`. The gateway sends it to the backend, and the backend answers it:
+
+| Backend | CORS | Status |
+|---|---|---|
+| Kokoro (Cloud Run) | On by default (`cors_origins = ["*"]` in Kokoro-FastAPI) | Not checked through the gateway |
+| vLLM on Vertex AI (`:rawPredict`) | vLLM sends `Access-Control-Allow-Origin: *` by default | Not verified: Vertex AI may reject `OPTIONS` on `:rawPredict` or drop the headers |
+
+If the browser shows "Network or CORS error" for the LLM tab, put a small proxy on Cloud Run between the gateway and the endpoint. It answers `OPTIONS`, adds the CORS headers and calls Vertex AI with an access token. It also fixes the ID-token problem in the Vertex AI gateway section above.
+
+Local work: `cd ui && npm install && npm run mock` (fake TTS and LLM on port 5181, key `test`), then in a second terminal `cp public/models.mock.json public/models.json && npm run dev`.
+
 ## Tests
 
 The tests use mock providers. They need no GCP credentials.
@@ -429,3 +459,5 @@ cd infra/modules/vertex-model && terraform init -backend=false && terraform test
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 ```
+
+The test UI has its own unit tests: `cd ui && npm install && npm test`.

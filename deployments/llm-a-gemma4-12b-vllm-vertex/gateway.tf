@@ -27,9 +27,13 @@ locals {
       api_key = { type = "apiKey", name = "x-api-key", in = "header" }
     }
     security = [{ api_key = [] }]
+    # options: the browser CORS preflight of the test UI. It has no API key, so it has security = [].
+    # NOT VERIFIED: that Vertex AI answers OPTIONS on :rawPredict and keeps the vLLM CORS headers
+    # (vLLM sends Access-Control-Allow-Origin "*" by default). See README, "Test UI".
     paths = {
       "/v1/chat/completions" = {
-        post = { operationId = "chatCompletions", responses = { "200" = { description = "Chat completion" } } }
+        post    = { operationId = "chatCompletions", responses = { "200" = { description = "Chat completion" } } }
+        options = { operationId = "chatCompletionsCors", security = [], responses = { "200" = { description = "CORS preflight" } } }
       }
     }
   }

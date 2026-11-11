@@ -24,12 +24,16 @@ locals {
       api_key = { type = "apiKey", name = "x-api-key", in = "header" }
     }
     security = [{ api_key = [] }]
+    # options: the browser CORS preflight of the test UI. It has no API key, so it has security = [].
+    # Kokoro answers it (CORS is on by default, origins "*"). Only OPTIONS skips the key.
     paths = {
       "/v1/audio/speech" = {
-        post = { operationId = "speech", responses = { "200" = { description = "Audio" } } }
+        post    = { operationId = "speech", responses = { "200" = { description = "Audio" } } }
+        options = { operationId = "speechCors", security = [], responses = { "200" = { description = "CORS preflight" } } }
       }
       "/v1/audio/voices" = {
-        get = { operationId = "voices", responses = { "200" = { description = "Voice list" } } }
+        get     = { operationId = "voices", responses = { "200" = { description = "Voice list" } } }
+        options = { operationId = "voicesCors", security = [], responses = { "200" = { description = "CORS preflight" } } }
       }
     }
   }

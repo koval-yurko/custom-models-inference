@@ -46,3 +46,10 @@ service-account*.json
 custom-models-inference-key.json
 # Project-local gcloud config (see .envrc)
 .gcloud/
+
+# Test UI (ui/): build output and the generated config (scripts/ui-deploy.py)
+ui/node_modules/
+ui/dist/
+ui/public/models.json
+# Brainstorm mockups (superpowers visual companion)
+.superpowers/

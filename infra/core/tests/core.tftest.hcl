@@ -76,3 +76,16 @@ run "vertex_ai_foundation" {
     error_message = "Vertex AI pulls only from Artifact Registry, so Docker Hub needs a proxy repo"
   }
 }
+
+run "ui_bucket_is_read_only_for_the_public" {
+  command = plan
+
+  assert {
+    condition     = google_storage_bucket_iam_member.ui_public_read.role == "roles/storage.legacyObjectReader"
+    error_message = "the public may only read UI files (no list, no write)"
+  }
+  assert {
+    condition     = google_storage_bucket.models.public_access_prevention == "enforced"
+    error_message = "the weights bucket must stay private"
+  }
+}
