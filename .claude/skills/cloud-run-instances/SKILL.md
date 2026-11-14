@@ -9,10 +9,10 @@ Read-only. It queries the Cloud Monitoring metric `run.googleapis.com/container/
 
 ## Run
 
-Run from the repo root. An agent shell does not load `.env`, so use `direnv exec`.
+Run it directly. The script loads the repo `.env` itself, so it needs no `direnv exec`.
 
 ```sh
-direnv exec . .claude/skills/cloud-run-instances/instances.sh [service]
+.claude/skills/cloud-run-instances/instances.sh [service]
 ```
 
 - With a service name, the output is one line: `<service> <count>`.

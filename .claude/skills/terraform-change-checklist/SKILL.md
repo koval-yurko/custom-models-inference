@@ -17,7 +17,7 @@ The agent does not apply or destroy (see `CLAUDE.md`), unless the user asks for 
    Fix every FAIL before you go on. These checks find only config errors.
 2. Run the real-world checks. Use a fresh environment: a shell that started before a `.env` change has old values, and the script reports `shell is stale`.
    ```sh
-   direnv exec . ./scripts/preflight.py --weights <folder> --l4
+   ./scripts/preflight.py --weights <folder> --l4
    ```
    FAIL means stop. WARN means the script could not check: tell the user what to check by hand (for example the L4 quota in the console).
 3. Run `terraform plan` in the root. Read it. Write down every line that says "replaced" or "destroyed".
@@ -44,7 +44,7 @@ The agent does not apply or destroy (see `CLAUDE.md`), unless the user asks for 
 | `code 14 ... Machine type temporarily unavailable` | GPU stock | Retry later, or use another machine type or region. See `infra/README.md`. |
 | `quota` or `RESOURCE_EXHAUSTED` | Quota | The user asks for more in the console (IAM & Admin > Quotas). |
 | `Unreadable module directory`, `organization must be set` | Setup | See skill `hcp-direnv-terraform`. |
-| `shell is stale`, or a resource appears in the wrong region | Old environment | Run `direnv reload`, or use `direnv exec .`. Run `hcp-sync.py` again. |
+| `shell is stale`, or a resource appears in the wrong region | Old environment | Run `direnv reload` or start a new shell. Run `hcp-sync.py` again. |
 | `invalid`, `unsupported argument`, a failed test | Config | Fix the code. Run `./scripts/check.py`. |
 
 Do not apply again for a config error. Apply again only for a timing error.
@@ -54,7 +54,7 @@ Do not apply again for a config error. Apply again only for a timing error.
 1. `./scripts/vertex.py undeploy deployments/<name>` for each Vertex AI deployment.
 2. `terraform destroy` in each deployment. Do it while HCP still has the old region.
 3. Empty the weights bucket. It has no `force_destroy`.
-4. Change `GCP_REGION` in `.env`. Run `direnv reload`. Run `direnv exec . ./scripts/hcp-sync.py`. Run `direnv exec . ./scripts/preflight.py`: the HCP region must show `ok`.
+4. Change `GCP_REGION` in `.env`. Run `direnv reload`. Run `./scripts/hcp-sync.py`. Run `./scripts/preflight.py`: the HCP region must show `ok`.
 5. Apply `infra/core`. Run the weights-copy job. Apply each deployment, then `scripts/vertex.py deploy` (it fills the image cache itself; no manual `curl`) and `scripts/gateway-streaming.py`.
 6. Run `./scripts/ui-deploy.py`. Update the region in the docs.
 

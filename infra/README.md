@@ -213,6 +213,8 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 
 Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with the `:rawPredict` URL of the endpoint as `target`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf` and `cors_proxy.tf`.
 
+For an endpoint with `invoke_routes = true`, set `target` to the `:invoke` base, which ends in `/invoke`. Use `path_translation = "APPEND_PATH_TO_ADDRESS"`. The proxy then adds the request path, for example `/extract` goes to `<base>/invoke/extract`. List each route as its own gateway path. See `deployments/llm-b-qwen35-9b-fastapi/`.
+
 To remove a gateway, destroy the deployment first. Then remove the name from `local.gateway_apis` and apply `infra/core/`.
 
 ### Gateway in another GCP project
@@ -484,6 +486,7 @@ cd infra/modules/vertex-model && terraform init -backend=false && terraform test
 cd infra/modules/cors-proxy && terraform init -backend=false && terraform test               # CORS proxy module
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
+cd deployments/llm-b-qwen35-9b-fastapi && terraform init -backend=false && terraform test       # custom container upload spec
 ```
 
 The test UI has its own unit tests: `cd ui && npm install && npm test`.

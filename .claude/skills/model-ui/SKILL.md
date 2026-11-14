@@ -44,6 +44,7 @@ output "ui" {
 | `tts` | `voices`, `default_voice` | `GET /v1/audio/voices` exists and returns `{"voices": [...]}`. |
 | `tts` | `formats`, `sample_rate` | `response_format` values; sample rate of `pcm` (16-bit mono). |
 | `llm` | `stream`, `max_tokens`, `max_context` | SSE on; default `max_tokens`; `--max-model-len`. |
+| `llm-routes` | `routes`, `max_tokens` | Own JSON routes of a FastAPI app (`/extract` returns `{data}`, `/generate` returns `{text}`), panel `LlmRoutes.tsx`. Default `max_tokens`. |
 
 ## Steps: new deployment with a gateway (known type: `llm`, `tts`)
 

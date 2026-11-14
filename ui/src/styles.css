@@ -42,6 +42,7 @@ audio { width: 100%; }
 .timings dt { opacity: .65; }
 .timings dd { margin: 0; font-variant-numeric: tabular-nums; }
 .curl pre { white-space: pre-wrap; word-break: break-all; font-size: .8rem; background: color-mix(in srgb, currentColor 6%, transparent); padding: 8px; border-radius: 6px; }
+.answer { white-space: pre-wrap; word-break: break-word; font-size: .9rem; background: color-mix(in srgb, currentColor 6%, transparent); padding: 8px; border-radius: 6px; }
 .error { color: #d33; white-space: pre-wrap; word-break: break-word; }
 .info { color: var(--accent); }
 .muted { opacity: .6; }

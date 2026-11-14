@@ -1,6 +1,6 @@
 # Private Cloud Run service between an API Gateway and a Vertex AI endpoint. Vertex AI sends no CORS
 # headers (not on OPTIONS, not on 200, 429 or 5xx), and API Gateway cannot add them. The proxy adds
-# them to every answer and forwards the POST to rawPredict with its own access token (cors_proxy.py).
+# them to every answer and forwards the POST to rawPredict (or :invoke + path) with its own access token (cors_proxy.py).
 # The gateway SA may call it. The proxy SA may call Vertex AI.
 module "service" {
   source = "../model-service"

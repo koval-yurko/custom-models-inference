@@ -5,6 +5,7 @@ Terraform code that serves open-weight models as private, scale-to-zero services
 | Model | Folder | Runs on |
 |---|---|---|
 | LLM: Gemma 4 12B (vLLM) | `deployments/llm-a-gemma4-12b-vllm-vertex` | Vertex AI, 1 L4 GPU |
+| LLM: Qwen3.5-9B FP8 (own FastAPI + vLLM image) | `deployments/llm-b-qwen35-9b-fastapi` | Vertex AI, 1 L4 GPU, no gateway yet |
 | TTS: Kokoro | `deployments/tts-a-kokoro-cpu` | Cloud Run, CPU |
 
 A GPU replica costs about $1.34 per hour while it runs. A budget alert does not stop spend.
@@ -31,7 +32,7 @@ Setup, once:
 1. Copy `.env.example` to `.env` and fill it in. Run `direnv allow`.
 2. Run `./scripts/hcp-sync.py`. Run it again after each `.env` change.
 
-Before each apply, run `./scripts/check.py` (local checks, no credentials) and `direnv exec . ./scripts/preflight.py` (read-only checks against the real project). Fix every FAIL. The README of a deployment adds the preflight flags for that model.
+Before each apply, run `./scripts/check.py` (local checks, no credentials) and `./scripts/preflight.py` (read-only checks against the real project). Fix every FAIL. The README of a deployment adds the preflight flags for that model.
 
 Steps, in this order:
 
@@ -39,6 +40,7 @@ Steps, in this order:
    Check: the plan says "No changes" after the apply.
 2. **Each model.** Follow the README of its folder. It has the exact commands for that model: the weights copy, the apply, the model deploy (Vertex AI), the gateway streaming and the test call.
    - [`deployments/llm-a-gemma4-12b-vllm-vertex`](deployments/llm-a-gemma4-12b-vllm-vertex/README.md)
+   - [`deployments/llm-b-qwen35-9b-fastapi`](deployments/llm-b-qwen35-9b-fastapi/README.md) (also builds its image with Cloud Build)
    - [`deployments/tts-a-kokoro-cpu`](deployments/tts-a-kokoro-cpu/README.md)
 3. **UI.** `./scripts/ui-deploy.py`. It writes `models.json`, builds the UI and uploads it. Run it after each deployment apply or `gateway-streaming.py` run, because the gateway URL can change.
 

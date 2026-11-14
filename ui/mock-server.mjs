@@ -29,5 +29,13 @@ http.createServer(async (req, res) => {
     for (const w of words) { res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: w + " " } }] })}\n\n`); await new Promise(r => setTimeout(r, 80)); }
     res.write(`data: ${JSON.stringify({ choices: [], usage: { completion_tokens: words.length } })}\n\ndata: [DONE]\n\n`); return res.end();
   }
+  if (req.url === "/extract") { // LLM-B app.py shape
+    res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ data: { people: ["Ada Lovelace", "Charles Babbage"], organizations: ["Royal Society"], places: ["London"], dates: ["5 June 1833"], schema_given: !!j.schema } }));
+  }
+  if (req.url === "/generate") {
+    res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ text: `Echo: ${j.prompt}` }));
+  }
   res.writeHead(404, cors); res.end();
 }).listen(Number(process.env.MOCK_PORT ?? 5181), () => console.log(`mock ready on ${process.env.MOCK_PORT ?? 5181}`));

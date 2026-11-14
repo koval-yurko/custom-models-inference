@@ -6,6 +6,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 TARGET = urlsplit(os.environ["TARGET"])
+# A target that ends in /invoke (Vertex AI :invoke) gets the request path appended: /extract -> .../invoke/extract.
+# A :rawPredict target is one fixed URL.
+INVOKE = TARGET.path.endswith("/invoke")
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -50,7 +53,7 @@ class H(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         try:
             conn = http.client.HTTPSConnection(TARGET.netloc, timeout=300)
-            conn.request("POST", TARGET.path, body, {"Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
+            conn.request("POST", TARGET.path + self.path if INVOKE else TARGET.path, body, {"Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
             r = conn.getresponse()
         except Exception as e:  # the gateway must always get an answer with CORS headers
             msg = json.dumps({"error": f"proxy: {e}"}).encode()
