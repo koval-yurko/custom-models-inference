@@ -46,3 +46,16 @@ run "gateway_sa_can_predict" {
     error_message = "only the gateway SA gets aiplatform.user"
   }
 }
+
+run "options_goes_to_cors_service" {
+  command = apply
+
+  assert {
+    condition     = local.openapi.paths["/v1/chat/completions"].options["x-google-backend"].address == data.google_cloud_run_v2_service.cors_preflight.uri
+    error_message = "the OPTIONS operation must call the cors-preflight service, not Vertex AI"
+  }
+  assert {
+    condition     = google_cloud_run_v2_service_iam_member.gateway_cors.role == "roles/run.invoker" && google_cloud_run_v2_service_iam_member.gateway_cors.member == "serviceAccount:${google_service_account.gateway.email}"
+    error_message = "only the gateway SA may call the cors-preflight service"
+  }
+}

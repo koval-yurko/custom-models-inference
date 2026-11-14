@@ -4,8 +4,8 @@ output "endpoint_id" {
 }
 
 output "endpoint_dns" {
-  description = "Dedicated endpoint DNS: https://<endpoint_id>.<region>-<project_number>.prediction.vertexai.goog."
-  value       = google_vertex_ai_endpoint.this.dedicated_endpoint_dns
+  description = "Dedicated endpoint DNS (no scheme): <endpoint_id>.<region>-<project_number>.prediction.vertexai.goog."
+  value       = local.endpoint_dns
 }
 
 output "service_account_email" {
@@ -14,12 +14,12 @@ output "service_account_email" {
 }
 
 output "vertex" {
-  description = "Input for vertex.sh. Pass it through as an output named vertex in the deployment root."
+  description = "Input for scripts/vertex.py. Pass it through as an output named vertex in the deployment root."
   value = {
     project        = var.project_id
     region         = var.region
     endpoint       = google_vertex_ai_endpoint.this.id
-    endpoint_dns   = google_vertex_ai_endpoint.this.dedicated_endpoint_dns
+    endpoint_dns   = local.endpoint_dns
     name           = var.name
     invoke_routes  = var.invoke_routes
     predict_route  = var.predict_route

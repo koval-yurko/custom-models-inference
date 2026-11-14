@@ -2,7 +2,7 @@
 
 Kokoro-82M text to speech with the stock image `ghcr.io/remsky/kokoro-fastapi-cpu:v0.10.0`. It has an OpenAI-compatible API (`POST /v1/audio/speech`).
 
-- Cloud Run service `tts-a-kokoro-cpu` in `europe-west4`, 4 vCPU, 8 GiB, no GPU.
+- Cloud Run service `tts-a-kokoro-cpu` in `us-central1`, 4 vCPU, 8 GiB, no GPU.
 - The image comes through the remote repo `ghcr` from `infra/core/`. The model weights are inside the image.
 - Scales to zero (min 0, max 1). The Cloud Run URL is private: only `INVOKER_EMAIL` and the gateway service account can call it.
 - Public access goes through API Gateway (`gateway.tf`, region `europe-west1`). The gateway checks the `x-api-key` header before it calls Cloud Run, so a request without a valid key does not start an instance.

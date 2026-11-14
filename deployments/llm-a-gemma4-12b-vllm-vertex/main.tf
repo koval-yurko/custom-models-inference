@@ -25,7 +25,7 @@ provider "google-beta" {
 }
 
 locals {
-  # Same folder as the Cloud Run version (deployments/llm-a-gemma4-12b-vllm), filled by the weights-copy job.
+  # Filled by the weights-copy job (TARGET_DIR).
   model_dir = "gemma-4-12b-it-qat-w4a16"
 }
 
@@ -35,7 +35,7 @@ module "model" {
   project_id = var.project_id
   region     = var.region
   name       = "llm-a-gemma4-12b-vllm-vertex"
-  # Stock image through the infra/core Docker Hub proxy, flags only. Same pin as the Cloud Run version.
+  # Stock image through the infra/core Docker Hub proxy, flags only.
   image = "${var.region}-docker.pkg.dev/${var.project_id}/dockerhub/vllm/vllm-openai:v0.33.0"
   args = [
     # Vertex AI sets AIP_STORAGE_URI from the model artifactUri; vLLM streams the weights from GCS.
@@ -52,7 +52,7 @@ module "model" {
   health_route  = "/health"
   predict_route = "/v1/chat/completions" # :rawPredict. For the full OpenAI API, use invoke_routes = true instead.
 
-  machine_type          = "g2-standard-8"
+  machine_type          = "g2-standard-12"
   accelerator_type      = "NVIDIA_L4"
   accelerator_count     = 1
   shared_memory_size_mb = 16384

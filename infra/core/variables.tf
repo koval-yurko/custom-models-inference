@@ -11,7 +11,7 @@ variable "billing_account" {
 variable "region" {
   description = "Region for buckets and Artifact Registry repos."
   type        = string
-  default     = "europe-west4"
+  default     = "us-central1"
 }
 
 variable "budget_amount" {

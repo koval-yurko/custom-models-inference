@@ -35,8 +35,9 @@ resource "google_cloud_run_v2_service" "this" {
     }
 
     containers {
-      image = var.image
-      args  = var.args
+      image   = var.image
+      command = var.command
+      args    = var.args
 
       ports {
         container_port = var.port

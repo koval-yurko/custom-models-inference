@@ -1,7 +1,7 @@
 locals {
   artifact_uri = var.weights_dir != null && var.weights_bucket != null ? "gs://${var.weights_bucket}/${trim(var.weights_dir, "/")}/" : null
 
-  # Request bodies for the Vertex AI REST API (v1beta1). vertex.sh sends them; Terraform has no resource
+  # Request bodies for the Vertex AI REST API (v1beta1). scripts/vertex.py sends them; Terraform has no resource
   # for a custom-container model upload or deploy with scale to zero.
   model_upload = {
     model = {
@@ -57,6 +57,15 @@ resource "google_storage_bucket_iam_member" "weights" {
 }
 
 # Dedicated endpoint: own DNS, no 1.5 MB body limit of the shared endpoint, needed for :invoke.
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+locals {
+  # dedicated_endpoint_dns is empty right after create. The DNS has a fixed format, so build it as a fallback.
+  endpoint_dns = coalesce(google_vertex_ai_endpoint.this.dedicated_endpoint_dns, "${google_vertex_ai_endpoint.this.name}.${var.region}-${data.google_project.this.number}.prediction.vertexai.goog")
+}
+
 # No IAM binding here: callers need aiplatform.endpoints.predict on the project, so nothing becomes public.
 resource "google_vertex_ai_endpoint" "this" {
   project = var.project_id

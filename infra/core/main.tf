@@ -17,6 +17,8 @@ locals {
     "apikeys.googleapis.com",
     # Vertex AI endpoints (infra/modules/vertex-model)
     "aiplatform.googleapis.com",
+    # Read GPU quotas (scripts/preflight.py --l4, gcloud beta quotas)
+    "cloudquotas.googleapis.com",
   ]
 }
 

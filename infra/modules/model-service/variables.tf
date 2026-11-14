@@ -23,6 +23,12 @@ variable "image" {
   type        = string
 }
 
+variable "command" {
+  description = "Container entrypoint. [] keeps the entrypoint of the image."
+  type        = list(string)
+  default     = []
+}
+
 variable "args" {
   description = "Container args."
   type        = list(string)

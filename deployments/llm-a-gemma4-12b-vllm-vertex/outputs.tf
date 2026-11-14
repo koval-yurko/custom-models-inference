@@ -8,7 +8,7 @@ output "endpoint_dns" {
   value       = module.model.endpoint_dns
 }
 
-# vertex.sh reads this output.
+# scripts/vertex.py reads this output.
 output "vertex" {
   value = module.model.vertex
 }

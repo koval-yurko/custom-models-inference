@@ -33,9 +33,10 @@ Contents:
 - The Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It can write to the weights bucket and read `hf-token`, and nothing more.
 - One API Gateway API for each entry in `local.gateway_apis` (`gateways.tf`), and a placeholder API config. A managed service can be enabled only after its API has a config, so the placeholder comes first, then the enabled service, then the key. No gateway uses the placeholder.
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
+- The Cloud Run service `cors-preflight` (`cors.tf`): a private Caddy container that answers the CORS preflight for gateways whose backend does not answer it (Vertex AI). See [CORS preflight service](#cors-preflight-service).
 - The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
-All resources go in `europe-west4` by default. Set `GCP_REGION` in `.env` to change it.
+All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to change it.
 
 | File in `core/` | Content |
 |---|---|
@@ -71,9 +72,20 @@ Terraform runs on HCP Terraform (remote execution). HCP stores the state, the va
 
 **The run does not use your `.env` or your gcloud login.** It uses the workspace variables from step 3. A local `.env` change has no effect until you run the script again.
 
-**What the CLI uploads.** For `infra/core/`, the CLI uploads only the `infra/core/` folder. The deployments use the module in `infra/modules/`, so the CLI uploads the whole repo for them (the workspace working directory is `deployments/<name>`). `.terraformignore` keeps `.env`, key files and `.gcloud/` out of the upload. Do not remove it.
+**What the CLI uploads.** `infra/core/` and the deployments use the module in `infra/modules/`, so the CLI uploads the whole repo for them (the workspace working directory is `deployments/<name>`). `.terraformignore` keeps `.env`, key files and `.gcloud/` out of the upload. Do not remove it.
 
 The workspace of `infra/core/` is `custom-models-bootstrap` (the old name, kept so that the state stays). Each root has its workspace name in `backend.tf`.
+
+### Quick steps for a deployment
+
+Use these steps for each new deployment, after the one-time setup above.
+
+1. Go to the repo root. Run `direnv allow` once. direnv loads `.env` in each terminal that you open in the repo.
+2. Run `./scripts/hcp-sync.py` in the repo root. It creates the HCP workspace with its working directory. Run it again after each `.env` change.
+3. Go to the deployment folder: `cd deployments/<name>`.
+4. Run `terraform init`, then `terraform plan` or `terraform apply`. You do not need the `direnv exec .` prefix in your own terminal. An agent shell has no direnv hook, so it needs the prefix.
+
+**Error `Unreadable module directory ... ../../infra`:** the workspace has no working directory. Run step 2 again.
 
 ## Apply
 
@@ -87,24 +99,24 @@ Outputs: `weights_bucket`, `models_repo`, `ghcr_repo`, `dockerhub_repo`, `region
 
 ### Vertex AI GPU quota (check before the first Vertex AI deployment)
 
-A Vertex AI endpoint with 1 `NVIDIA_L4` on `g2-standard-8` needs the quota "Custom model serving Nvidia L4 GPUs per region" in `europe-west4`. Prediction quota is separate from Compute Engine and Cloud Run GPU quota.
+A Vertex AI endpoint with 1 `NVIDIA_L4` on `g2-standard-8` needs the quota "Custom model serving Nvidia L4 GPUs per region" in `us-central1`. Prediction quota is separate from Compute Engine and Cloud Run GPU quota.
 
-1. Apply `infra/core/` first. It turns on `aiplatform.googleapis.com`.
-2. Open the console: IAM & Admin > Quotas & System Limits. Filter for `Service: Vertex AI API` and `L4`. Read the value for `region: europe-west4`.
+1. Apply `infra/core/` first. It turns on `aiplatform.googleapis.com` and `cloudquotas.googleapis.com`. `./scripts/preflight.py --l4` reads the quota through the second one.
+2. Open the console: IAM & Admin > Quotas & System Limits. Filter for `Service: Vertex AI API` and `L4`. Read the value for `region: us-central1`.
 3. Or use the CLI. This needs the Cloud Quotas API (`gcloud services enable cloudquotas.googleapis.com`) and the gcloud `beta` component:
    ```sh
    gcloud beta quotas info list --service=aiplatform.googleapis.com --format=json \
-     | jq -r '.[] | select(.quotaId | test("L4")) | .quotaId as $q | .dimensionsInfos[] | select(.dimensions.region == "europe-west4") | "\($q) \(.details.value)"'
+     | jq -r '.[] | select(.quotaId | test("L4")) | .quotaId as $q | .dimensionsInfos[] | select(.dimensions.region == "us-central1") | "\($q) \(.details.value)"'
    ```
 4. If the value is 0, request 1 GPU on the same console page. Scale to zero reserves quota for `max_replica_count`.
 
 ## Copy model weights
 
-Run the job 1 time for each model. Set the repo and the target folder for each execution:
+Run the job 1 time for each model. Set the repo and the target folder for each execution. The values for a model are in the README of its deployment folder.
 
 ```sh
 gcloud run jobs execute weights-copy --wait \
-  --update-env-vars HF_REPO=google/gemma-4-12B-it-qat-w4a16-ct,TARGET_DIR=gemma-4-12b-it-qat-w4a16
+  --update-env-vars HF_REPO=<org/repo>,TARGET_DIR=<folder>
 ```
 
 The job mounts the bucket with GCS FUSE at `/models` and runs `hf download --local-dir /models/$TARGET_DIR`. The task timeout is 1 hour. A deployment then reads the files at `/models/<TARGET_DIR>`.
@@ -222,7 +234,7 @@ It creates:
 |---|---|---|
 | `project_id`, `region`, `name`, `image` | required | `name`: 6-49 chars, lowercase letters, digits, hyphens. SA ID = `name` if 30 chars or less, else 25 chars + `-` + 4 hash chars. |
 | `invokers` | required | IAM members, for example `["user:me@example.com"]`. `allUsers` and `allAuthenticatedUsers` are rejected. |
-| `args`, `env` | `[]`, `{}` | Container args and plain env vars. No secrets. |
+| `command`, `args`, `env` | `[]`, `[]`, `{}` | Container entrypoint, args and plain env vars. No secrets. `command = []` keeps the entrypoint of the image. |
 | `port` | `8080` | Container port. Cloud Run sets `$PORT`. |
 | `cpu`, `memory` | `"4"`, `"16Gi"` | Resource limits |
 | `gpu_type` | `null` | `"nvidia-l4"` (min 4 CPU, 16Gi) or `"nvidia-rtx-pro-6000"` (min 20 CPU, 80Gi). GCP checks the minimums at apply time. |
@@ -246,7 +258,7 @@ module "service" {
   project_id         = var.project_id
   region             = var.region
   name               = "tts-a-kokoro-cpu"
-  image              = "europe-west4-docker.pkg.dev/${var.project_id}/ghcr/remsky/kokoro-fastapi-cpu:v0.10.0"
+  image              = "us-central1-docker.pkg.dev/${var.project_id}/ghcr/remsky/kokoro-fastapi-cpu:v0.10.0"
   cpu                = "4"
   memory             = "8Gi"
   startup_probe_path = "/health"
@@ -264,7 +276,7 @@ Terraform creates:
 - `roles/storage.objectViewer` on `weights_bucket` for that service account, if you set one,
 - a dedicated Vertex AI endpoint (own DNS, no 1.5 MB body limit of the shared endpoint, needed for `:invoke`).
 
-`modules/vertex-model/vertex.sh` does the model upload and the deploy through the Vertex AI REST API (`v1beta1`). Terraform only renders the request bodies (output `vertex`).
+`scripts/vertex.py` does the model upload and the deploy through the Vertex AI REST API (`v1beta1`). Terraform only renders the request bodies (output `vertex`).
 
 ### Deploy method: Terraform plus 1 script step
 
@@ -293,19 +305,19 @@ output "vertex" {
    ```sh
    cd deployments/<name> && terraform apply
    ```
-2. Upload and deploy. The script waits for both operations (the deploy can take 30 minutes).
+2. Upload and deploy. First the script fills the image cache of the remote proxy repo with one manifest request, because Vertex AI does not start the proxy fetch. The script stops if the answer is not 200. Then it waits for both operations (the deploy can take 30 minutes).
    ```sh
-   direnv exec . ../../infra/modules/vertex-model/vertex.sh deploy
+   ./scripts/vertex.py deploy deployments/<name>
    ```
 3. Remove. Undeploy first: Vertex AI does not delete an endpoint that has a deployed model. The script also deletes the uploaded model, and a model that a failed deploy left behind.
    ```sh
-   direnv exec . ../../infra/modules/vertex-model/vertex.sh undeploy
-   terraform destroy
+   ./scripts/vertex.py undeploy deployments/<name>   # in the repo root
+   cd deployments/<name> && terraform destroy
    ```
 
 To change the image, args or machine: run `undeploy`, then `terraform apply`, then `deploy`. `deploy` stops if the endpoint already has a model.
 
-The script needs `terraform`, `gcloud`, `curl` and `jq`.
+The script needs `terraform` and `gcloud`. It uses only the Python standard library.
 
 ### Routes
 
@@ -389,7 +401,7 @@ The endpoint is private. The module grants no access. A caller needs `aiplatform
 
 ### Outputs
 
-`endpoint_id`, `endpoint_dns`, `service_account_email`, `vertex` (input for `vertex.sh`).
+`endpoint_id`, `endpoint_dns`, `service_account_email`, `vertex` (input for `scripts/vertex.py`).
 
 ### Example
 
@@ -400,7 +412,7 @@ module "model" {
   project_id            = var.project_id
   region                = var.region
   name                  = "llm-a-gemma4-12b-vllm-vertex"
-  image                 = "europe-west4-docker.pkg.dev/${var.project_id}/dockerhub/vllm/vllm-openai:v0.33.0"
+  image                 = "us-central1-docker.pkg.dev/${var.project_id}/dockerhub/vllm/vllm-openai:v0.33.0"
   args                  = ["--model=$(AIP_STORAGE_URI)", "--load-format=runai_streamer", "--host=0.0.0.0", "--port=8080"]
   predict_route         = "/v1/chat/completions"
   shared_memory_size_mb = 16384
@@ -420,7 +432,7 @@ The first deployment card (LLM-A on Vertex AI) checks these:
 1. vLLM `runai_streamer` reads `gs://` in the pinned image (research open question 5).
 2. Vertex AI expands `$(AIP_STORAGE_URI)` in `args`, and the service account can read the URI that Vertex AI sets.
 3. `invokeRoutePrefix` sits in `containerSpec` in `v1beta1`, and the `<base>/invoke/<path>` URL form.
-4. The L4 quota for Vertex AI prediction in `europe-west4` (see [Vertex AI GPU quota](#vertex-ai-gpu-quota-check-before-the-first-vertex-ai-deployment)).
+4. The L4 quota for Vertex AI prediction in `us-central1` (see [Vertex AI GPU quota](#vertex-ai-gpu-quota-check-before-the-first-vertex-ai-deployment)).
 
 ## Test UI
 
@@ -442,9 +454,21 @@ CORS: the browser sends a preflight `OPTIONS` request before each call, because 
 | Backend | CORS | Status |
 |---|---|---|
 | Kokoro (Cloud Run) | On by default (`cors_origins = ["*"]` in Kokoro-FastAPI) | Not checked through the gateway |
-| vLLM on Vertex AI (`:rawPredict`) | vLLM sends `Access-Control-Allow-Origin: *` by default | Not verified: Vertex AI may reject `OPTIONS` on `:rawPredict` or drop the headers |
+| vLLM on Vertex AI (`:rawPredict`) | Vertex AI does not answer `OPTIONS` | Use the CORS preflight service |
 
-If the browser shows "Network or CORS error" for the LLM tab, put a small proxy on Cloud Run between the gateway and the endpoint. It answers `OPTIONS`, adds the CORS headers and calls Vertex AI with an access token. It also fixes the ID-token problem in the Vertex AI gateway section above.
+For the LLM tab, use the CORS preflight service (next section). A proxy in front of Vertex AI is the heavier option: it adds CORS to every response, also to the 429, but it handles every call.
+
+### CORS preflight service
+
+Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS headers with its own errors. So a gateway of a Vertex AI deployment sends the `OPTIONS` operations to a small service in `infra/core` (`cors.tf`) and not to Vertex AI.
+
+- The service `cors-preflight` is a Cloud Run service with the official Caddy image from the `dockerhub` proxy repo. The command is `caddy respond`: it answers every request with status 204 and the CORS headers (`Access-Control-Allow-Origin: *`, methods `GET, POST, OPTIONS`, headers `content-type, x-api-key, authorization`).
+- It is private and scales to zero. It runs as a service account without roles. `invokers` in `cors.tf` is empty: each deployment gives `roles/run.invoker` on it to its own gateway service account, so destroying a deployment removes only its own permission.
+- A deployment reads the URL with a `google_cloud_run_v2_service` data source (name `cors-preflight`). Outputs: `cors_preflight_url` and `cors_preflight_service`.
+- A deployment uses it in 3 places (see `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`): the data source, `x-google-backend` (`address` = the service URL) on the `options` operation, and the invoker permission.
+- It only fixes the preflight. A 429 from Vertex AI still has no CORS headers: the UI retries on a network error when `cold_start` is `vertex-429`.
+- Kokoro answers CORS itself, so the TTS gateway does not use it.
+- Check: `curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.googleapis.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"`. The answer must be 204 or 200 with `access-control-allow-origin`.
 
 Local work: `cd ui && npm install && npm run mock` (fake TTS and LLM on port 5181, key `test`), then in a second terminal `cp public/models.mock.json public/models.json && npm run dev`.
 

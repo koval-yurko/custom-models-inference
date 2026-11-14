@@ -33,6 +33,11 @@ resource "google_storage_bucket_iam_member" "weights_copy" {
   bucket = google_storage_bucket.models.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.weights_copy.email}"
+
+  # The bucket name stays the same when the bucket is replaced (for example a new region). Without this, the new bucket has no permission.
+  lifecycle {
+    replace_triggered_by = [google_storage_bucket.models]
+  }
 }
 
 resource "google_secret_manager_secret_iam_member" "weights_copy" {

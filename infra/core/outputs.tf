@@ -46,3 +46,13 @@ output "ui_url" {
   description = "Public URL of the test UI."
   value       = "https://storage.googleapis.com/${google_storage_bucket.ui.name}/index.html"
 }
+
+output "cors_preflight_url" {
+  description = "Private Cloud Run service that answers the CORS preflight (cors.tf). Gateways of Vertex AI deployments use it for OPTIONS."
+  value       = module.cors_preflight.url
+}
+
+output "cors_preflight_service" {
+  description = "Name of the CORS preflight service. A deployment gives run.invoker on it to its gateway service account."
+  value       = module.cors_preflight.service_name
+}

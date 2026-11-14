@@ -6,7 +6,7 @@ variable "project_id" {
 variable "region" {
   description = "Region. Must match the infra/core region."
   type        = string
-  default     = "europe-west4"
+  default     = "us-central1"
 }
 
 variable "gateway_region" {

@@ -254,3 +254,17 @@ run "rejects_name_over_49_chars" {
 
   expect_failures = [var.name]
 }
+
+run "command_and_args_reach_the_container" {
+  command = plan
+
+  variables {
+    command = ["caddy"]
+    args    = ["respond", "--listen", ":8080"]
+  }
+
+  assert {
+    condition     = google_cloud_run_v2_service.this.template[0].containers[0].command == tolist(["caddy"]) && google_cloud_run_v2_service.this.template[0].containers[0].args == tolist(["respond", "--listen", ":8080"])
+    error_message = "command and args must reach the container"
+  }
+}

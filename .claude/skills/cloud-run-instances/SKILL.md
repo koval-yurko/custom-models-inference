@@ -25,7 +25,7 @@ direnv exec . .claude/skills/cloud-run-instances/instances.sh [service]
 - The metric lags by 1 to 2 minutes.
 - A service with no points in the window shows `0`. This is scale to zero.
 - Scale to zero is confirmed only when the count stays `0` for at least 17 minutes after the last request.
-- For a GPU service (for example `llm-a-gemma4-12b-vllm`), a count above `0` means money is spent now (L4 about $1/hour).
+- For a GPU service (none runs on Cloud Run today), a count above `0` means money is spent now (L4 about $1/hour).
 
 ## Report
 

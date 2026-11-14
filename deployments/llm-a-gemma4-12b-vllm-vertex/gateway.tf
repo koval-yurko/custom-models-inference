@@ -28,15 +28,38 @@ locals {
     }
     security = [{ api_key = [] }]
     # options: the browser CORS preflight of the test UI. It has no API key, so it has security = [].
-    # NOT VERIFIED: that Vertex AI answers OPTIONS on :rawPredict and keeps the vLLM CORS headers
-    # (vLLM sends Access-Control-Allow-Origin "*" by default). See README, "Test UI".
+    # Vertex AI does not answer OPTIONS, so this operation goes to the cors-preflight service of infra/core.
     paths = {
       "/v1/chat/completions" = {
-        post    = { operationId = "chatCompletions", responses = { "200" = { description = "Chat completion" } } }
-        options = { operationId = "chatCompletionsCors", security = [], responses = { "200" = { description = "CORS preflight" } } }
+        post = { operationId = "chatCompletions", responses = { "200" = { description = "Chat completion" } } }
+        options = {
+          operationId = "chatCompletionsCors"
+          security    = []
+          responses   = { "200" = { description = "CORS preflight" } }
+          x-google-backend = {
+            address          = data.google_cloud_run_v2_service.cors_preflight.uri
+            path_translation = "CONSTANT_ADDRESS"
+            deadline         = 15.0
+          }
+        }
       }
     }
   }
+}
+
+# The service is made by infra/core/cors.tf. It is private: the gateway SA needs run.invoker.
+data "google_cloud_run_v2_service" "cors_preflight" {
+  project  = var.project_id
+  location = var.region
+  name     = "cors-preflight"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "gateway_cors" {
+  project  = var.project_id
+  location = var.region
+  name     = data.google_cloud_run_v2_service.cors_preflight.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.gateway.email}"
 }
 
 resource "google_service_account" "gateway" {
@@ -87,5 +110,5 @@ resource "google_api_gateway_gateway" "this" {
   gateway_id = local.gateway_id
   api_config = google_api_gateway_api_config.this.id
 
-  depends_on = [google_project_iam_member.gateway_predict]
+  depends_on = [google_project_iam_member.gateway_predict, google_cloud_run_v2_service_iam_member.gateway_cors]
 }

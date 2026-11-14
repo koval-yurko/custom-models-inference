@@ -23,6 +23,12 @@ export async function call(
       res = await fetch(model.base_url + path, { ...init, headers: { ...init.headers, "x-api-key": getApiKey() } });
     } catch (e) {
       if (init.signal?.aborted) throw e;
+      // Vertex AI sends its 429 (cold start) without CORS headers, so the browser reports a network error. Retry like a 429.
+      if (model.features.cold_start === "vertex-429" && attempt < MAX_RETRIES) {
+        onRetry?.(attempt + 1);
+        await sleep(RETRY_EVERY_MS, init.signal);
+        continue;
+      }
       // The browser hides the reason. The gateway rejects a wrong key (HTTP 400/401) without CORS headers,
       // so a wrong key looks the same as a CORS or network failure.
       throw new Error(`Request to ${path} failed. Most likely a wrong API key; else gateway CORS (OPTIONS), the URL or the network. (${e})`);

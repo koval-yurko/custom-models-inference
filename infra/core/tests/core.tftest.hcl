@@ -72,6 +72,10 @@ run "vertex_ai_foundation" {
     error_message = "Vertex AI deployments need the Vertex AI API"
   }
   assert {
+    condition     = contains(keys(google_project_service.apis), "cloudquotas.googleapis.com")
+    error_message = "preflight.py and the quota steps in infra/README.md read the L4 quota through the Cloud Quotas API"
+  }
+  assert {
     condition     = google_artifact_registry_repository.dockerhub.remote_repository_config[0].docker_repository[0].public_repository == "DOCKER_HUB"
     error_message = "Vertex AI pulls only from Artifact Registry, so Docker Hub needs a proxy repo"
   }

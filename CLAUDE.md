@@ -4,22 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Terraform-only infrastructure for serving open-weight models (LLM, TTS, later STT) as private, scale-to-zero Cloud Run v2 services on GCP (`europe-west4`). The only application code is the static test UI in `ui/` (React + Vite, see below). Research and design decisions are in `docs/research/` and `docs/specs/` (design + plan files, dated). Read the relevant spec before changing behaviour.
+Terraform-only infrastructure for serving open-weight models (LLM, TTS, later STT) as private, scale-to-zero Cloud Run v2 services on GCP (`us-central1`). The only application code is the static test UI in `ui/` (React + Vite, see below). Research and design decisions are in `docs/research/` and `docs/specs/` (design + plan files, dated). Read the relevant spec before changing behaviour.
 
 ## Architecture
 
 Two layers. Each Terraform root has its own HCP Terraform workspace (state), named in its `backend.tf`. Runs are remote (HCP Terraform executes plan and apply). Workspace variables, including the service account key as `GOOGLE_CREDENTIALS`, come from `.env` through `scripts/hcp-sync.py`; run it after every `.env` change. `.terraformignore` keeps secrets out of the config upload. All infra docs are in one file: `infra/README.md`.
 
-1. `infra/core/` — one root, one apply, once per GCP project (workspace `custom-models-bootstrap`, the old name, kept for the state). Enables APIs, creates the `<project_id>-models` bucket, Artifact Registry repos (`models`, `ghcr` as a remote proxy for `ghcr.io` because Cloud Run cannot pull from `ghcr.io`, and `dockerhub` as a remote proxy for Docker Hub because Vertex AI pulls only from Artifact Registry), the budget, the `hf-token` secret, the `weights-copy` Cloud Run job (`weights_copy.tf`), and in `gateways.tf` one API Gateway API per name in `local.gateway_apis` plus one shared API key restricted to those APIs.
+1. `infra/core/` — one root, one apply, once per GCP project (workspace `custom-models-bootstrap`, the old name, kept for the state). Enables APIs, creates the `<project_id>-models` bucket, Artifact Registry repos (`models`, `ghcr` as a remote proxy for `ghcr.io` because Cloud Run cannot pull from `ghcr.io`, and `dockerhub` as a remote proxy for Docker Hub because Vertex AI pulls only from Artifact Registry), the budget, the `hf-token` secret, the `weights-copy` Cloud Run job (`weights_copy.tf`), and in `gateways.tf` one API Gateway API per name in `local.gateway_apis` plus one shared API key restricted to those APIs. It also runs the private `cors-preflight` Cloud Run service (`cors.tf`, stock Caddy image) that answers the CORS preflight for Vertex AI gateways.
    - `infra/modules/model-service/` — the shared module. One call = one private Cloud Run service + its service account + `run.invoker` for `invokers` + read-only GCS mount of the weights bucket at `/models`. Public invokers (`allUsers`, `allAuthenticatedUsers`) are rejected by validation. Min instances is always 0. The module sets `deletion_protection = false`.
-   - `infra/modules/vertex-model/` — the Vertex AI module (all models except TTS-A). One call = service account + objectViewer on the weights bucket + dedicated private endpoint. The model upload and deploy (scale to zero, Preview) run through `vertex.sh` after apply, because the provider has no resource for them. See `infra/README.md` (section "Module: vertex-model") for routes, the HTTP 429 retry rule and the weights flow (`AIP_STORAGE_URI`).
+   - `infra/modules/vertex-model/` — the Vertex AI module (all models except TTS-A). One call = service account + objectViewer on the weights bucket + dedicated private endpoint. The model upload and deploy (scale to zero, Preview) run through `scripts/vertex.py deploy deployments/<name>` after apply (it also fills the image cache of the proxy repo first), because the provider has no resource for them. See `infra/README.md` (section "Module: vertex-model") for routes, the HTTP 429 retry rule and the weights flow (`AIP_STORAGE_URI`).
 2. `deployments/<name>/` — one folder and one state per model (convention: never list several models in one root). Each calls the module with a pinned stock image plus flags/env. A deployment can add a public API Gateway (`gateway.tf`: gateway SA, OpenAPI spec with `x-api-key`, API config, gateway) on the API that `infra/core/gateways.tf` creates with the same ID. Apply `infra/core/` first. Streaming on the gateway needs the post-apply script `scripts/gateway-streaming.py`, because the provider cannot set it.
 
 Weights flow: Hugging Face → `weights-copy` job (GCS FUSE) → `<project_id>-models/<TARGET_DIR>/` → mounted at `/models` in the service, with `HF_HUB_OFFLINE=1`. `local.model_dir` in a deployment must match the job's `TARGET_DIR`.
 
 ## Commands
 
-Terraform (remote runs on HCP) and `scripts/hcp-sync.py` are the tools (no tflint, no Makefile, no CI).
+Terraform (remote runs on HCP) and `scripts/hcp-sync.py` are the tools (no Makefile, no CI).
 
 ```sh
 terraform fmt -recursive                      # from repo root
@@ -28,6 +28,8 @@ cd infra/core && terraform init && terraform validate
 cd deployments/<name> && terraform init   # needs .env loaded (direnv): TF_CLOUD_ORGANIZATION and TF_TOKEN_app_terraform_io
 cd deployments/<name> && terraform apply
 ```
+
+Before every apply, run `./scripts/check.py` (fmt, validate, `terraform test` and `tflint` in every root; no credentials) and `direnv exec . ./scripts/preflight.py` (read-only checks against the real project: stale shell, HCP region variable, APIs, bucket and repo region, weights, L4 quota). Use the project skill `terraform-change-checklist`. tflint: install the binary from GitHub (Homebrew has no formula), then `tflint --init` once.
 
 Tests use a mock provider and need no GCP credentials. Run from the directory that has the `tests/` folder:
 
@@ -60,11 +62,19 @@ All secrets live in the git-ignored root `.env` (template: `.env.example`). Neve
 
 ## Conventions and gotchas
 
+- Scripts: write every helper script in Python 3 (standard library only), in `scripts/`. Do not write shell (`.sh`) scripts. Each script loads the repo `.env` itself and takes the deployment path as an argument (see `scripts/gateway-streaming.py`, `scripts/vertex.py`).
+- Skills: create and update project skills only, in `.claude/skills/` of this repo. Do not create or change global skills in `~/.claude/skills/`, unless the user says so explicitly. Project skill for the run steps: `hcp-direnv-terraform`.
 - There are no `terraform.tfvars` files (`*.tfvars` is git-ignored). All variable values come from `.env`. `.terraform.lock.hcl` is tracked on purpose; plans are not. Never commit tokens or keys.
 - Anti-goals from the specs: no public services, no min instances above 0, no model lists in one root.
 - Billing budgets do not stop spend. GPU services bill per instance while running (L4 about $1/hour).
 - Apply, test calls and destroy against real GCP are run by the user, not by the agent. The agent verifies with `terraform fmt`, `validate` and `terraform test`.
 - Per-deployment READMEs hold the apply, test-call (`gcloud auth print-identity-token`), cold-start and scale-to-zero checks.
+- Where docs go: the root `README.md` has the overview, the global setup and links. It has no step that belongs to one model. `infra/README.md` has the shared parts (core, modules) and uses placeholders such as `HF_REPO=<org/repo>`. The README of a deployment has every command for that model, with real values: preflight flags, weights copy, apply, deploy, gateway streaming, test, destroy. Link to a section. Do not repeat the same command in two files.
+- Global or specific: `check.py` and the base `preflight.py` are global. The flags `--weights <folder>` and `--l4` belong to the deployment README.
+- Real-GCP commands (apply, destroy, deploy, test calls) run only when the user asks for them in the same message. Never print the real API key or any `.env` value.
+- UI test with Claude in Chrome (only when the user asks): open the UI URL, copy the key silently with `cd infra/core && direnv exec . terraform output -raw api_key | pbcopy`, paste it with cmd+v into the key field, then clear the clipboard with `printf '' | pbcopy`. Before the test, compare the gateway URLs in the deployed `models.json` (`curl` the UI bucket) with the real gateways. A LLM call starts a GPU replica (about $1.34 per hour), so say so first. After a key paste, click "Reload voices" on the TTS tab.
+- After a gateway recreate, run `scripts/gateway-streaming.py <deployment>` and then `scripts/ui-deploy.py`. The URL can change. Google tokens last 1 hour, so a long operation needs a token refresh (`vertex.py` does it).
+- An empty HCP workspace left after a deployment removal is deleted by the user in the HCP UI. Tell the user its name.
 - Docs prose in this repo is written in Simplified Technical English (short sentences, active voice, no contractions). Match that style.
 
 ## Recommended tools for working here
@@ -74,4 +84,4 @@ Already installed: `terraform`, `gcloud`. Useful MCP servers and skills:
 - `context7` MCP — current docs for the `google` provider and vLLM flags (versions move fast; the provider is pinned `~> 8.10`).
 - `pycharm` MCP (in `.mcp.json`) — file and symbol search; optional, the repo has no Python.
 - `superpowers` plugin (enabled in `.claude/settings.json`) — brainstorming, writing-plans and verification skills match the spec/plan workflow in `docs/specs/`.
-- Optional: a Terraform MCP server (`hashicorp/terraform-mcp-server`) for provider and module lookups, and `tflint` for linting (not installed).
+- Optional: a Terraform MCP server (`hashicorp/terraform-mcp-server`) for provider and module lookups, and `tflint` for linting (installed, see Commands).
