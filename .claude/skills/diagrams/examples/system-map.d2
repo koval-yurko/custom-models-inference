@@ -1,0 +1,29 @@
+direction: right
+classes: {
+  public: {style: {fill: "#fff4e5"; stroke: "#d97706"; border-radius: 6}}
+  private: {style: {fill: "#e8f1ff"; stroke: "#2563eb"; border-radius: 6}}
+  store: {shape: cylinder; style: {fill: "#ecfdf3"; stroke: "#059669"}}
+  ext: {style: {fill: "#f3f4f6"; stroke: "#6b7280"; border-radius: 6}}
+}
+public: Public internet {
+  style: {fill: "#fffaf2"; stroke: "#d97706"; stroke-dash: 3}
+  ui: "Browser\ntest UI" {class: public}
+  curl: curl {class: public}
+  gw: "API Gateway\nchecks x-api-key" {class: public}
+  ui -> gw: x-api-key
+  curl -> gw: x-api-key
+}
+gcp: "Private on GCP (scale to zero)" {
+  style: {fill: "#f5f9ff"; stroke: "#2563eb"; stroke-dash: 3}
+  tts: "Cloud Run\nTTS Kokoro (CPU)" {class: private}
+  proxy: "Cloud Run\ncors-proxy" {class: private}
+  vx: "Vertex AI endpoint\nLLM Gemma 4 (L4 GPU)" {class: private}
+  bucket: "GCS bucket\nmodel weights" {class: store}
+  proxy -> vx: access token
+  bucket -> tts: /models mount {style.stroke-dash: 4}
+  bucket -> vx: AIP_STORAGE_URI {style.stroke-dash: 4}
+}
+hf: Hugging Face {class: ext}
+public.gw -> gcp.tts: ID token
+public.gw -> gcp.proxy: ID token
+hf -> gcp.bucket: weights-copy job

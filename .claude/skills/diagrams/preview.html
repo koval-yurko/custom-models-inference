@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- Renders a repo Markdown file with Mermaid like GitHub does. Serve the repo root:
+     python3 -m http.server 8765 --bind 127.0.0.1
+     then open /.claude/skills/diagrams/preview.html?f=docs/README.md (add &d=N for diagram N only). -->
+<html><head><meta charset="utf-8"><title>diagram preview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-light.min.css">
+<style>body{max-width:980px;margin:20px auto}.markdown-body{padding:20px}</style></head>
+<body><article class="markdown-body" id="out">loading</article>
+<script type="module">
+import {marked} from 'https://cdn.jsdelivr.net/npm/marked@14/+esm';
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+const q = new URLSearchParams(location.search);
+const f = q.get('f') || 'docs/README.md';
+const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/') + 1) : '';
+let md = await (await fetch('/' + f + '?t=' + Date.now())).text();
+const d = q.get('d');
+if (d !== null) {
+  const blocks = md.match(/```mermaid[\s\S]*?```/g) || [];
+  md = `**${f}, diagram ${d} of ${blocks.length}**\n\n` + (blocks[+d] || 'none');
+}
+const r = new marked.Renderer();
+const code = r.code.bind(r);
+r.code = (t) => t.lang === 'mermaid' ? `<pre class="mermaid">${t.text.replace(/</g, '&lt;')}</pre>` : code(t);
+const out = document.getElementById('out');
+out.innerHTML = marked.parse(md, {renderer: r});
+out.querySelectorAll('img').forEach(i => {
+  const s = i.getAttribute('src');
+  if (!/^(https?:|\/)/.test(s)) i.src = '/' + dir + s;
+});
+mermaid.initialize({startOnLoad: false});
+try { await mermaid.run({querySelector: '.mermaid'}); document.title = 'OK ' + f; }
+catch (e) { document.title = 'ERR ' + e.message; }
+</script></body></html>

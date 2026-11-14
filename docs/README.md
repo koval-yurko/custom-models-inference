@@ -1,0 +1,55 @@
+# Docs
+
+Short guides with diagrams. Details are in [`infra/README.md`](../infra/README.md). Commands for one model are in the README of its deployment.
+
+| Read | To learn |
+|---|---|
+| This page | The system map, the 2 layers, the weights flow |
+| [scripts.md](scripts.md) | What each script in `scripts/` does, and in which order to run them |
+| [gateway-and-streaming.md](gateway-and-streaming.md) | What API Gateway does, and how streaming works |
+| [backends.md](backends.md) | Cloud Run and Vertex AI, cold start and cost |
+| [auth-and-ui.md](auth-and-ui.md) | Keys and tokens, the test UI, common errors |
+
+Older notes: [`research/`](research/) (options and prices) and [`specs/`](specs/) (design and plans, dated).
+
+## System map
+
+![System map: public gateway, private backends, weights flow](diagrams/system-map.svg)
+
+Source: [`diagrams/system-map.d2`](diagrams/system-map.d2). After a change, run `d2 --layout elk --pad 20 docs/diagrams/system-map.d2 docs/diagrams/system-map.svg`.
+
+Only the gateway is public. Every backend is private and scales to zero. Dashed lines show how the services read the weights. The details of the weights flow are in the diagram below.
+
+## Two layers
+
+```mermaid
+flowchart LR
+    core["<b>infra/core</b><br/>apply once per project<br/>―――<br/>APIs, budget, registry repos<br/>buckets: weights, UI<br/>weights-copy job, hf-token secret<br/>API Gateway APIs, 1 shared API key"]
+    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model-service or vertex-model<br/>gateway.tf<br/>output ui"]
+    core -->|"apply first"| dep
+
+    classDef layer fill:#f8fafc,stroke:#475569,color:#111
+    class core,dep layer
+```
+
+| Folder | Content |
+|---|---|
+| `infra/core/` | Shared setup. Apply once. |
+| `infra/modules/` | `model-service` (Cloud Run) and `vertex-model` (Vertex AI) |
+| `deployments/<name>/` | One model: image, flags, gateway |
+| `scripts/` | Python helpers |
+| `ui/` | React test UI |
+
+State and runs are on HCP Terraform. Each root has its own workspace.
+
+## Weights flow
+
+```mermaid
+flowchart LR
+    HF["Hugging Face"] --> J["job weights-copy<br/>(HF_REPO, TARGET_DIR)"]
+    J --> B[("gs://project-models/TARGET_DIR/")]
+    B -->|"/models mount"| CR["Cloud Run"]
+    B -->|"AIP_STORAGE_URI"| VX["Vertex AI"]
+```
+
+`local.model_dir` in a deployment must match `TARGET_DIR` of the job.
