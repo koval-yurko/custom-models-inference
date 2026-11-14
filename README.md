@@ -14,13 +14,13 @@ A GPU replica costs about $1.34 per hour while it runs. A budget alert does not 
 | Folder | Content |
 |---|---|
 | `infra/core/` | Shared setup. Apply it once per project. It makes the APIs, the buckets, the Artifact Registry repos, the budget, the `weights-copy` job, the API Gateway APIs, the shared API key and the `cors-preflight` service. |
-| `infra/modules/` | `model-service` (Cloud Run) and `vertex-model` (Vertex AI). Deployments use them. |
+| `infra/modules/` | `model-service` (Cloud Run), `vertex-model` (Vertex AI) and `cors-proxy` (CORS for Vertex AI gateways). Deployments use them. |
 | `deployments/<name>/` | One folder and one state per model. It has the image, the flags and the gateway. |
 | `scripts/` | Python helpers: `check.py`, `preflight.py`, `hcp-sync.py`, `vertex.py`, `gateway-streaming.py`, `ui-deploy.py`. |
 | `ui/` | The test UI (React and Vite). |
 | `docs/` | Research and design notes. |
 
-All details are in [`infra/README.md`](infra/README.md). Rules for the agent are in [`CLAUDE.md`](CLAUDE.md).
+Guides with diagrams are in [`docs/`](docs/README.md). All details are in [`infra/README.md`](infra/README.md). Rules for the agent are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Deploy
 

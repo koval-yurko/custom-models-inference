@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { call } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
 import { parseModels } from "./config";
 import { voiceIds } from "./panels/Tts";
@@ -58,5 +59,31 @@ describe("voiceIds", () => {
   it("accepts Kokoro voice objects and plain strings", () => {
     expect(voiceIds([{ id: "af_alloy", name: "af_alloy" }, "am_adam", { name: "x" }, 5])).toEqual(["af_alloy", "am_adam", "x"]);
     expect(voiceIds(undefined)).toEqual([]);
+  });
+});
+
+describe("call (Vertex 429 retry)", () => {
+  const model = { base_url: "https://gw", features: { cold_start: "vertex-429" } } as never;
+  beforeEach(() => vi.stubGlobal("localStorage", { getItem: () => "k" })); // the Node test environment has none
+  afterEach(() => (vi.unstubAllGlobals(), vi.useRealTimers()));
+
+  it("does not retry a network error", async () => {
+    const f = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", f);
+    const onRetry = vi.fn();
+    await expect(call(model, "/x", {}, onRetry)).rejects.toThrow(/failed/);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("retries a real 429 after 30 s and returns the next answer", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn().mockResolvedValueOnce(new Response("", { status: 429 })).mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    const onRetry = vi.fn();
+    const p = call(model, "/x", {}, onRetry);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await p).status).toBe(200);
+    expect(onRetry).toHaveBeenCalledWith(1);
   });
 });

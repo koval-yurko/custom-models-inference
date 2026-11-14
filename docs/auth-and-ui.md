@@ -76,7 +76,7 @@ flowchart LR
 |---|---|---|
 | UI: "Failed to fetch", voices do not load | Wrong or missing key (the gateway sends a 4xx without CORS headers), old gateway URL, or CORS (LLM: the proxy is not applied) | Enter the key, click Reload voices, run `ui-deploy.py --config-only` |
 | HTTP 401 from the gateway | Wrong API key | Get the key again |
-| HTTP 429 from the LLM | Cold start (0 replicas) | Wait. The UI retries. |
+| HTTP 429 from the LLM | Cold start (0 replicas) | Wait. The UI retries every 30 s on a 429 only. |
 | `ACCESS_TOKEN_EXPIRED` in `vertex.py` | Operation longer than 1 hour | Run it again (the script refreshes the token) |
 | Plan shows the wrong region | Stale shell or old HCP variable | `direnv reload`, `./scripts/hcp-sync.py` |
 | 401 or 403 on the LLM `POST` | The gateway SA has no `run.invoker` on the proxy, or the proxy SA has no `aiplatform.user` | Apply the deployment again. Check both roles. |

@@ -1,8 +1,7 @@
 # Public API Gateway in front of the private Vertex AI endpoint. The gateway checks the API key,
 # so a request without a valid key never starts a replica.
-# NOT VERIFIED: API Gateway calls the backend with a Google ID token of the gateway SA. Vertex AI may
-# accept only OAuth access tokens. If the first call through the gateway returns 401, Vertex AI rejects
-# the ID token: then put a small token proxy on Cloud Run between the gateway and the endpoint (see README).
+# The gateway calls the CORS proxy (cors_proxy.tf) with a Google ID token of the gateway SA. The proxy calls Vertex AI
+# with an access token and adds the CORS headers that Vertex AI does not send.
 # Streaming: the provider has no field for it. Run scripts/gateway-streaming.py after apply (see README).
 
 locals {
@@ -17,8 +16,8 @@ locals {
     schemes  = ["https"]
     produces = ["application/json"]
     x-google-backend = {
-      # :rawPredict forwards the body unchanged to the container predict_route (/v1/chat/completions).
-      address          = "https://${module.model.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${module.model.endpoint_id}:rawPredict"
+      # The CORS proxy (cors_proxy.tf) answers every call and OPTIONS, and forwards the POST to Vertex AI.
+      address          = module.cors_proxy.url
       path_translation = "CONSTANT_ADDRESS"
       # The limit for the whole response. At 0 replicas, Vertex AI returns 429 at once (no wait for the cold start).
       deadline = 300.0
@@ -28,7 +27,7 @@ locals {
     }
     security = [{ api_key = [] }]
     # options: the browser CORS preflight of the test UI. It has no API key, so it has security = [].
-    # Vertex AI does not answer OPTIONS, so this operation goes to the cors-preflight service of infra/core.
+    # The CORS proxy answers it.
     paths = {
       "/v1/chat/completions" = {
         post = { operationId = "chatCompletions", responses = { "200" = { description = "Chat completion" } } }
@@ -36,44 +35,16 @@ locals {
           operationId = "chatCompletionsCors"
           security    = []
           responses   = { "200" = { description = "CORS preflight" } }
-          x-google-backend = {
-            address          = data.google_cloud_run_v2_service.cors_preflight.uri
-            path_translation = "CONSTANT_ADDRESS"
-            deadline         = 15.0
-          }
         }
       }
     }
   }
 }
 
-# The service is made by infra/core/cors.tf. It is private: the gateway SA needs run.invoker.
-data "google_cloud_run_v2_service" "cors_preflight" {
-  project  = var.project_id
-  location = var.region
-  name     = "cors-preflight"
-}
-
-resource "google_cloud_run_v2_service_iam_member" "gateway_cors" {
-  project  = var.project_id
-  location = var.region
-  name     = data.google_cloud_run_v2_service.cors_preflight.name
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.gateway.email}"
-}
-
 resource "google_service_account" "gateway" {
   project      = var.project_id
   account_id   = "${local.gateway_id}-gw"
   display_name = "API Gateway for ${local.gateway_id}"
-}
-
-# The provider has no IAM resource for 1 Vertex AI endpoint, so the role is on the project.
-# The member is the gateway SA of this deployment only, so destroy removes only this binding.
-resource "google_project_iam_member" "gateway_predict" {
-  project = var.project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.gateway.email}"
 }
 
 resource "google_api_gateway_api_config" "this" {
@@ -110,5 +81,5 @@ resource "google_api_gateway_gateway" "this" {
   gateway_id = local.gateway_id
   api_config = google_api_gateway_api_config.this.id
 
-  depends_on = [google_project_iam_member.gateway_predict, google_cloud_run_v2_service_iam_member.gateway_cors]
+  depends_on = [module.cors_proxy]
 }

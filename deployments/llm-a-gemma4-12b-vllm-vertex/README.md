@@ -5,7 +5,7 @@ First deployment of the module `infra/modules/vertex-model` (see `infra/README.m
 - Model `google/gemma-4-12B-it-qat-w4a16-ct`, served as `gemma-4-12b` by `vllm/vllm-openai:v0.33.0` (through the `dockerhub` proxy repo of `infra/core`).
 - Private Vertex AI endpoint in `us-central1`: `g2-standard-12`, 1 `NVIDIA_L4`. It scales to zero (max 1 replica). A replica costs about $1.34 per hour.
 - Weights: `gs://<project_id>-models/gemma-4-12b-it-qat-w4a16/`. Route: `/v1/chat/completions` through `:rawPredict`.
-- Public API Gateway `llm-a-gemma4-vertex` checks `x-api-key`. A request without a key never starts a replica. The `OPTIONS` (CORS) operation goes to the `cors-preflight` service of `infra/core`.
+- Public API Gateway `llm-a-gemma4-vertex` checks `x-api-key`. A request without a key never starts a replica. Behind it, the private Cloud Run service `llm-a-gemma4-vertex-proxy` (`cors_proxy.tf`) forwards the POST to Vertex AI and adds CORS headers to every answer, also to the 429. It answers `OPTIONS` too.
 
 ## Deploy
 

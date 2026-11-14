@@ -46,7 +46,7 @@ sequenceDiagram
     V-->>UI: 200 after a few minutes (through the proxy and the gateway)
 ```
 
-Rule: retry only on 429. The UI does this. The loop in the deployment README does the same.
+Rule: retry only on a real 429. The UI does this. The loop in the deployment README does the same. The UI does not retry a network error: that error means a wrong API key, a CORS problem or a wrong URL, and a wait would not help.
 
 ## Vertex AI deploy
 

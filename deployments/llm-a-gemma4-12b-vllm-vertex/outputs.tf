@@ -45,7 +45,7 @@ output "ui" {
     features = {
       stream      = true # SSE: needs scripts/gateway-streaming.py
       max_tokens  = 1024
-      cold_start  = "vertex-429" # at 0 replicas Vertex AI returns 429 at once: the UI retries every 30 s
+      cold_start  = "vertex-429" # at 0 replicas Vertex AI returns 429 at once: the UI retries every 30 s on a real 429 (the CORS proxy keeps it readable)
       max_context = 32768        # --max-model-len in main.tf
     }
   }

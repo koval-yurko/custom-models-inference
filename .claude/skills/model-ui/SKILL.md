@@ -39,7 +39,7 @@ output "ui" {
 
 | type | key | meaning |
 |---|---|---|
-| all | `cold_start = "vertex-429"` | Vertex AI returns 429 at 0 replicas. The UI retries every 30 s, at most 60 times. Set it for every Vertex AI deployment. |
+| all | `cold_start = "vertex-429"` | Vertex AI returns 429 at 0 replicas. The UI retries every 30 s, at most 60 times, on a real 429 only (not on a network error). The answer must pass the CORS proxy, or the browser hides the 429. Set it for every Vertex AI deployment. |
 | `tts` | `stream` | Gateway streaming is on (`scripts/gateway-streaming.py`). Enables "Stream and play at once" (PCM). |
 | `tts` | `voices`, `default_voice` | `GET /v1/audio/voices` exists and returns `{"voices": [...]}`. |
 | `tts` | `formats`, `sample_rate` | `response_format` values; sample rate of `pcm` (16-bit mono). |
@@ -49,7 +49,7 @@ output "ui" {
 
 1. Do the gateway steps in `infra/README.md`, "Add a gateway to a new deployment".
 2. In `gateway.tf`, give every path an `options` operation with `security = []` (the CORS preflight has no key). Copy the pattern from `deployments/tts-a-kokoro-cpu/gateway.tf`.
-3. Check that the backend answers CORS: `OPTIONS` with `Access-Control-Allow-Origin` and `Access-Control-Allow-Headers` that allow `x-api-key`. vLLM and Kokoro-FastAPI do it by default. For a custom image, add CORS middleware (FastAPI `CORSMiddleware`, origins `*`).
+3. Check that the backend answers CORS: `OPTIONS` with `Access-Control-Allow-Origin` and `Access-Control-Allow-Headers` that allow `x-api-key`. Kokoro-FastAPI does it by default. Vertex AI does not (no `OPTIONS` answer, no CORS headers on any answer): call the module `infra/modules/cors-proxy` (see `deployments/llm-a-gemma4-12b-vllm-vertex/cors_proxy.tf`) and set the gateway backend to its URL. For a custom image on Cloud Run, add CORS middleware (FastAPI `CORSMiddleware`, origins `*`).
 4. Copy `tests/gateway.tftest.hcl`; it checks the `options` operations. Run `terraform init -backend=false && terraform test`.
 5. Add the `ui` output to `outputs.tf`.
 6. Tell the user to apply (and run `scripts/gateway-streaming.py` if streaming). The agent does not apply.

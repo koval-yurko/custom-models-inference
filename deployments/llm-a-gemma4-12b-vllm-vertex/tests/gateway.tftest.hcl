@@ -29,33 +29,16 @@ run "gateway_requires_api_key" {
     error_message = "the gateway must expose only the chat route (rawPredict reaches only predict_route)"
   }
   assert {
-    condition     = endswith(local.openapi["x-google-backend"].address, ":rawPredict") && local.openapi["x-google-backend"].path_translation == "CONSTANT_ADDRESS"
-    error_message = "the backend must be the endpoint rawPredict URL with a constant address"
+    condition     = local.openapi["x-google-backend"].address == module.cors_proxy.url && local.openapi["x-google-backend"].path_translation == "CONSTANT_ADDRESS"
+    error_message = "the gateway must call the CORS proxy (it adds the CORS headers), with a constant address"
   }
 }
 
-run "gateway_sa_can_predict" {
+run "service_accounts" {
   command = apply
 
   assert {
     condition     = length(google_service_account.gateway.account_id) <= 30
     error_message = "the gateway SA ID must be 30 chars or less"
-  }
-  assert {
-    condition     = google_project_iam_member.gateway_predict.member == "serviceAccount:${google_service_account.gateway.email}" && google_project_iam_member.gateway_predict.role == "roles/aiplatform.user"
-    error_message = "only the gateway SA gets aiplatform.user"
-  }
-}
-
-run "options_goes_to_cors_service" {
-  command = apply
-
-  assert {
-    condition     = local.openapi.paths["/v1/chat/completions"].options["x-google-backend"].address == data.google_cloud_run_v2_service.cors_preflight.uri
-    error_message = "the OPTIONS operation must call the cors-preflight service, not Vertex AI"
-  }
-  assert {
-    condition     = google_cloud_run_v2_service_iam_member.gateway_cors.role == "roles/run.invoker" && google_cloud_run_v2_service_iam_member.gateway_cors.member == "serviceAccount:${google_service_account.gateway.email}"
-    error_message = "only the gateway SA may call the cors-preflight service"
   }
 }

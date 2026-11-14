@@ -38,7 +38,7 @@ E = os.environ.get
 # workspace -> (working directory, terraform variables). A variable is skipped when its .env value is empty.
 COMMON = {"project_id": E("GCP_PROJECT_ID"), "region": E("GCP_REGION")}
 WORKSPACES = {
-    # infra/core. The workspace keeps its old name, so the state stays. It uses the module cors_preflight (cors.tf) outside its folder.
+    # infra/core. The workspace keeps its old name, so the state stays.
     "custom-models-bootstrap": ("infra/core", {**COMMON, "billing_account": E("BILLING_ACCOUNT"), "budget_amount": E("BUDGET_AMOUNT"),
                                       "hf_token": E("HF_TOKEN")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.

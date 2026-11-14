@@ -7,6 +7,7 @@
 | `core/` | One Terraform root with one apply. It prepares one GCP project for all deployments under `deployments/`. |
 | `modules/model-service/` | The Cloud Run module. Each Cloud Run deployment calls it. |
 | `modules/vertex-model/` | The Vertex AI module. Each Vertex AI deployment calls it. |
+| `modules/cors-proxy/` | The CORS proxy module (Cloud Run). Each Vertex AI deployment with a gateway for the browser calls it. |
 
 Contents:
 
@@ -33,7 +34,6 @@ Contents:
 - The Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It can write to the weights bucket and read `hf-token`, and nothing more.
 - One API Gateway API for each entry in `local.gateway_apis` (`gateways.tf`), and a placeholder API config. A managed service can be enabled only after its API has a config, so the placeholder comes first, then the enabled service, then the key. No gateway uses the placeholder.
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
-- The Cloud Run service `cors-preflight` (`cors.tf`): a private Caddy container that answers the CORS preflight for gateways whose backend does not answer it (Vertex AI). See [CORS preflight service](#cors-preflight-service).
 - The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
 All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to change it.
@@ -211,7 +211,7 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
 9. Add the `ui` output and run `./scripts/ui-deploy.py`. Follow the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
-Vertex AI deployments: step 4 is different. There is no `invokers` list. `gateway.tf` gives the gateway service account `roles/aiplatform.user` on the project, and the backend is the `:rawPredict` URL of the endpoint (`path_translation = "CONSTANT_ADDRESS"`). See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`. Not verified: Vertex AI may reject the ID token that the gateway sends.
+Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with the `:rawPredict` URL of the endpoint as `target`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf` and `cors_proxy.tf`.
 
 To remove a gateway, destroy the deployment first. Then remove the name from `local.gateway_apis` and apply `infra/core/`.
 
@@ -454,19 +454,20 @@ CORS: the browser sends a preflight `OPTIONS` request before each call, because 
 | Backend | CORS | Status |
 |---|---|---|
 | Kokoro (Cloud Run) | On by default (`cors_origins = ["*"]` in Kokoro-FastAPI) | Not checked through the gateway |
-| vLLM on Vertex AI (`:rawPredict`) | Vertex AI does not answer `OPTIONS` | Use the CORS preflight service |
+| vLLM on Vertex AI (`:rawPredict`) | Vertex AI has no CORS: no `OPTIONS` answer and no CORS headers on any answer | Use the CORS proxy |
 
-For the LLM tab, use the CORS preflight service (next section). A proxy in front of Vertex AI is the heavier option: it adds CORS to every response, also to the 429, but it handles every call.
+For the LLM tab, use the CORS proxy (next section).
 
-### CORS preflight service
+### CORS proxy
 
-Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS headers with its own errors. So a gateway of a Vertex AI deployment sends the `OPTIONS` operations to a small service in `infra/core` (`cors.tf`) and not to Vertex AI.
+Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS headers with its answers (200, 429 and 5xx). API Gateway cannot add response headers. So a gateway of a Vertex AI deployment calls a CORS proxy, and the proxy calls Vertex AI. The module is `modules/cors-proxy/`.
 
-- The service `cors-preflight` is a Cloud Run service with the official Caddy image from the `dockerhub` proxy repo. The command is `caddy respond`: it answers every request with status 204 and the CORS headers (`Access-Control-Allow-Origin: *`, methods `GET, POST, OPTIONS`, headers `content-type, x-api-key, authorization`).
-- It is private and scales to zero. It runs as a service account without roles. `invokers` in `cors.tf` is empty: each deployment gives `roles/run.invoker` on it to its own gateway service account, so destroying a deployment removes only its own permission.
-- A deployment reads the URL with a `google_cloud_run_v2_service` data source (name `cors-preflight`). Outputs: `cors_preflight_url` and `cors_preflight_service`.
-- A deployment uses it in 3 places (see `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`): the data source, `x-google-backend` (`address` = the service URL) on the `options` operation, and the invoker permission.
-- It only fixes the preflight. A 429 from Vertex AI still has no CORS headers: the UI retries on a network error when `cold_start` is `vertex-429`.
+- The proxy is a private Cloud Run service in the stock `python` image from the `dockerhub` proxy repo. It runs `cors_proxy.py` (standard library only, no build).
+- It answers `OPTIONS` itself with status 204 and the CORS headers (`Access-Control-Allow-Origin: *`, methods `GET, POST, OPTIONS`, headers `content-type, x-api-key, authorization`).
+- It forwards a `POST` to the `target` (the `:rawPredict` URL) with its own access token, streams the answer back, and adds the CORS headers to every answer, also to the 429.
+- It scales to zero (max 2 instances). Only the gateway SA has `roles/run.invoker`. Only the proxy SA has `roles/aiplatform.user` (on the project: the provider has no IAM resource for 1 endpoint).
+- Inputs: `project_id`, `region`, `name`, `image`, `target`, `gateway_service_account_email`. Outputs: `url`, `service_name`, `service_account_email`.
+- A deployment uses it in 2 places (see `deployments/llm-a-gemma4-12b-vllm-vertex/`): `cors_proxy.tf` calls the module, and `gateway.tf` sets `x-google-backend.address` to `module.cors_proxy.url` for the whole API. The `options` operation has no backend of its own.
 - Kokoro answers CORS itself, so the TTS gateway does not use it.
 - Check: `curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.googleapis.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"`. The answer must be 204 or 200 with `access-control-allow-origin`.
 
@@ -480,6 +481,7 @@ The tests use mock providers. They need no GCP credentials.
 cd infra/core && terraform init -backend=false && terraform test                             # core
 cd infra/modules/model-service && terraform init -backend=false && terraform test            # module
 cd infra/modules/vertex-model && terraform init -backend=false && terraform test             # Vertex AI module
+cd infra/modules/cors-proxy && terraform init -backend=false && terraform test               # CORS proxy module
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 ```
