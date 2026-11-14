@@ -13,7 +13,7 @@ Do `infra/core` first (see `infra/README.md`). Run the commands from the repo ro
 
 0. Check the weights folder and the L4 quota. Fix every FAIL. The weights check fails until step 1 is done.
    ```sh
-   direnv exec . ./scripts/preflight.py --weights gemma-4-12b-it-qat-w4a16 --l4
+   ./scripts/preflight.py --weights gemma-4-12b-it-qat-w4a16 --l4
    ```
 1. Copy the weights. Skip this step when the folder already has files.
    ```sh

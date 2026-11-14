@@ -30,7 +30,7 @@ cd deployments/<name> && terraform init   # needs .env loaded (direnv): TF_CLOUD
 cd deployments/<name> && terraform apply
 ```
 
-Before every apply, run `./scripts/check.py` (fmt, validate, `terraform test` and `tflint` in every root; no credentials) and `direnv exec . ./scripts/preflight.py` (read-only checks against the real project: stale shell, HCP region variable, APIs, bucket and repo region, weights, L4 quota). Use the project skill `terraform-change-checklist`. tflint: install the binary from GitHub (Homebrew has no formula), then `tflint --init` once.
+Before every apply, run `./scripts/check.py` (fmt, validate, `terraform test` and `tflint` in every root; no credentials) and `./scripts/preflight.py` (read-only checks against the real project: stale shell, HCP region variable, APIs, bucket and repo region, weights, L4 quota). Use the project skill `terraform-change-checklist`. tflint: install the binary from GitHub (Homebrew has no formula), then `tflint --init` once.
 
 Tests use a mock provider and need no GCP credentials. Run from the directory that has the `tests/` folder:
 
@@ -57,7 +57,8 @@ All secrets live in the git-ignored root `.env` (template: `.env.example`). Neve
 | `HF_TOKEN` | `.envrc` exports it as `TF_VAR_hf_token`; infra/core writes it to the `hf-token` secret (write-only, not in state) |
 
 - `.envrc` (direnv) loads `.env` after a one-time `direnv allow`. It sets `CLOUDSDK_CONFIG=.gcloud/`, so gcloud never uses a global login or config.
-- Agent shells do not run the direnv hook. Run `direnv exec . terraform ...` and `direnv exec . gcloud ...`.
+- Every script in `scripts/` (and `.claude/skills/*/*.sh`) loads the repo `.env` itself. Run it directly, for example `./scripts/preflight.py --weights <folder> --l4`. Never put `direnv exec .` in front of a script, and never document it that way. A new script must load `.env` itself too (copy `load_env()` from `scripts/vertex.py`).
+- Agent shells do not run the direnv hook. Only raw `terraform` and `gcloud` commands need it: run `direnv exec . terraform ...` and `direnv exec . gcloud ...`.
 - `.worktreeinclude` lists the ignored files that Claude Code copies into new worktrees (`.env`, `.claude/settings.local.json`). In a new worktree, run `direnv allow` once: direnv approvals are per path. `.gcloud/` is not copied; gcloud makes it again from the key file. Keep the key file outside the repo: `.env` holds its absolute path, so every worktree finds it.
 - The service account (`terraform@<project_id>.iam.gserviceaccount.com`) has `roles/owner` on the project. The billing-account role (Costs Manager) is not verified.
 

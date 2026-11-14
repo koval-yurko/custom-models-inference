@@ -96,7 +96,9 @@ def warm_cache():
         return
     path, _, tag = rest.rpartition(":")
     project, repo, image = path.split("/", 2)
-    accept = "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json"
+    # Multi-arch lists (stock Docker Hub images) and single manifests (own Cloud Build images).
+    accept = ("application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,"
+              "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json")
     req = urllib.request.Request(f"https://{host}/v2/{project}/{repo}/{image}/manifests/{tag}",
                                  headers={"Authorization": f"Bearer {TOKEN}", "Accept": accept})
     print(f"Fill the image cache for {uri}...")

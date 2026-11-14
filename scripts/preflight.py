@@ -32,6 +32,9 @@ def load_env():
     if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         os.environ.setdefault("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
         os.environ.setdefault("CLOUDSDK_CONFIG", str(ROOT / ".gcloud"))
+    # Like .envrc: gcloud calls without --project need it, so the script runs without direnv.
+    if os.environ.get("GCP_PROJECT_ID"):
+        os.environ.setdefault("CLOUDSDK_CORE_PROJECT", os.environ["GCP_PROJECT_ID"])
 
 
 def sh(*cmd):

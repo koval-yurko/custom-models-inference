@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # Print "<service> <instance count>" for Cloud Run services. Usage: instances.sh [service]
-# Needs GCP_PROJECT_ID and gcloud auth: run it as `direnv exec . ./instances.sh`.
+# Loads the repo .env itself (like scripts/*.py), so it needs no direnv: run it directly.
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+if [ -z "${GCP_PROJECT_ID:-}" ] && [ -f "$ROOT/.env" ]; then
+  set -a; . "$ROOT/.env"; set +a
+fi
+# Same gcloud identity as .envrc: the service account key and the repo-local config dir.
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="${CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE:-$GOOGLE_APPLICATION_CREDENTIALS}"
+  export CLOUDSDK_CONFIG="${CLOUDSDK_CONFIG:-$ROOT/.gcloud}"
+fi
 
 svc="${1:-}"
 filter='metric.type="run.googleapis.com/container/instance_count"'

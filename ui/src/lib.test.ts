@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
 import { parseModels } from "./config";
+import { parseSchema } from "./panels/LlmRoutes";
 import { voiceIds } from "./panels/Tts";
 import { parseSse, readSse } from "./sse";
 
@@ -85,5 +86,19 @@ describe("call (Vertex 429 retry)", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect((await p).status).toBe(200);
     expect(onRetry).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("parseSchema", () => {
+  it("treats empty text as the app.py default schema", () => {
+    expect(parseSchema("  ")).toEqual({});
+  });
+  it("parses a JSON object", () => {
+    expect(parseSchema('{"type":"object"}')).toEqual({ schema: { type: "object" } });
+  });
+  it("rejects invalid JSON and non-objects", () => {
+    expect(parseSchema("{bad").error).toMatch(/not valid JSON/);
+    expect(parseSchema("[1]").error).toMatch(/JSON object/);
+    expect(parseSchema("null").error).toMatch(/JSON object/);
   });
 });

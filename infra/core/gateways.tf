@@ -8,6 +8,7 @@ locals {
   gateway_apis = [
     "tts-a-kokoro-cpu",
     "llm-a-gemma4-vertex",
+    "llm-b-qwen35-fastapi",
   ]
 }
 

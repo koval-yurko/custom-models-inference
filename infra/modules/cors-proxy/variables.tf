@@ -14,7 +14,7 @@ variable "name" {
 }
 
 variable "target" {
-  description = "Vertex AI rawPredict URL that the proxy calls (https://<endpoint_dns>/v1/projects/.../endpoints/<id>:rawPredict)."
+  description = "Vertex AI URL that the proxy calls: the :rawPredict URL (https://<endpoint_dns>/v1/projects/.../endpoints/<id>:rawPredict), or the :invoke base that ends in /invoke. For /invoke the proxy appends the request path, so the gateway must use path_translation APPEND_PATH_TO_ADDRESS."
   type        = string
 
   validation {
