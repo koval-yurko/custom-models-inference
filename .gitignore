@@ -53,3 +53,6 @@ ui/dist/
 ui/public/models.json
 # Brainstorm mockups (superpowers visual companion)
 .superpowers/
+
+# Verification runs (scripts/verify-ui.py): logs and evidence, kept after cleanup
+.verify/

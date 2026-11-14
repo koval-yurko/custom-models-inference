@@ -69,6 +69,7 @@ flowchart LR
 - On a Vertex AI cold start, the UI retries every 30 s (up to 30 minutes).
 - Local work: `cd ui && npm test && npm run build`. Mock backend: `npm run mock` and `npm run dev`.
 - To add a model tab, use the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
+- To prove a UI change in a real browser against the mock, use the `verify-ui` skill (`.claude/skills/verify-ui/SKILL.md`).
 
 ## Common errors
 

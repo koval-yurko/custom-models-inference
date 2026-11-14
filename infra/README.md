@@ -471,7 +471,7 @@ Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS heade
 - Kokoro answers CORS itself, so the TTS gateway does not use it.
 - Check: `curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.googleapis.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"`. The answer must be 204 or 200 with `access-control-allow-origin`.
 
-Local work: `cd ui && npm install && npm run mock` (fake TTS and LLM on port 5181, key `test`), then in a second terminal `cp public/models.mock.json public/models.json && npm run dev`.
+Local work: `cd ui && npm install && npm run mock` (fake TTS and LLM on port 5181 or `MOCK_PORT`, key `test`), then in a second terminal `cp public/models.mock.json public/models.json && npm run dev`.
 
 ## Tests
 

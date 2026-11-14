@@ -10,6 +10,8 @@ All scripts are Python 3 (standard library only) in `scripts/`. They load the re
 | `vertex.py deploy\|undeploy <dir>` | First fills the image cache of the `dockerhub` proxy repo (one manifest request, must give 200). Then it uploads and deploys the model on Vertex AI, or removes it. Refreshes the token on a 401. | Yes (GPU cost) |
 | `gateway-streaming.py <dir>` | Replaces the gateway with a streaming one. Skips a gateway that already streams. | Yes (URL changes) |
 | `ui-deploy.py` | Writes `models.json`, builds the UI, uploads to the UI bucket. Flags: `--config-only`, `--local`. | Yes (UI bucket) |
+| `verify-ui.py up\|doctor\|down` | Starts the UI and the mock gateways on free ports for a verification run, checks them, stops them. Logs and evidence stay in `.verify/ui/<run-id>/`. Guide: the `verify-ui` skill. | No (local only) |
+| `verify-gcp.py state [--plan]\|smoke\|call --tts\|--llm` | Checks the real project: state (read-only), drift (`--plan`, remote plan), smoke (no key, curl-level), real calls (`call`, costs money). Reports in `.verify/gcp/`. Guide: the `verify-gcp` skill. | No (`call`: yes, model calls) |
 
 Why the post-apply scripts exist: the Terraform provider has no resource for a Vertex AI model deploy, and no field for gateway streaming.
 

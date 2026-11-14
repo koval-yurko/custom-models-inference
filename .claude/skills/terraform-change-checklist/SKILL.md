@@ -34,6 +34,7 @@ The agent does not apply or destroy (see `CLAUDE.md`), unless the user asks for 
 
 1. Run `terraform plan` again. It must say "No changes". If not, the apply is not finished: read what is left.
 2. Run `./scripts/preflight.py` again.
+3. Run `./scripts/verify-gcp.py state` and `./scripts/verify-gcp.py smoke` (free). See the `verify-gcp` skill.
 
 ## Read an error
 

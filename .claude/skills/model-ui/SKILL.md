@@ -84,7 +84,7 @@ cd ui && npm run mock                                              # terminal 1:
 cd ui && cp public/models.mock.json public/models.json && npm run dev   # terminal 2
 ```
 
-Open the printed URL and enter the key `test`. `npm run dev` listens on all interfaces, so a phone on the same network can open `http://<mac-ip>:5173`. To test real deployments locally instead, run `./scripts/ui-deploy.py --local`.
+Open the printed URL and enter the key `test`. For a scripted run with evidence, use the `verify-ui` skill instead. `npm run dev` listens on all interfaces, so a phone on the same network can open `http://<mac-ip>:5173`. To test real deployments locally instead, run `./scripts/ui-deploy.py --local`.
 
 ## Pitfalls
 
