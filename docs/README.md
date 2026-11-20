@@ -7,7 +7,7 @@ Short guides with diagrams. Details are in [`infra/README.md`](../infra/README.m
 | This page | The system map, the 2 layers, the weights flow |
 | [scripts.md](scripts.md) | What each script in `scripts/` does, and in which order to run them |
 | [gateway-and-streaming.md](gateway-and-streaming.md) | What API Gateway does, and how streaming works |
-| [backends.md](backends.md) | Cloud Run and Vertex AI, cold start and cost |
+| [backends.md](backends.md) | Cloud Run and Vertex AI, cold start and cost, Slack messages at scale up and down |
 | [auth-and-ui.md](auth-and-ui.md) | Keys and tokens, the test UI, common errors |
 
 Older notes: [`research/`](research/) (options and prices) and [`specs/`](specs/) (design and plans, dated).
@@ -24,8 +24,8 @@ Only the gateway is public. Every backend is private and scales to zero. Dashed 
 
 ```mermaid
 flowchart LR
-    core["<b>infra/core</b><br/>apply once per project<br/>―――<br/>APIs, budget, registry repos<br/>buckets: weights, UI<br/>weights-copy job, hf-token secret<br/>API Gateway APIs, 1 shared API key"]
-    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model-service or vertex-model<br/>gateway.tf<br/>output ui"]
+    core["<b>infra/core</b><br/>apply once per project<br/>―――<br/>APIs, budget, registry repos<br/>buckets: weights, UI<br/>weights-copy job, hf-token secret<br/>API Gateway APIs, 1 shared API key<br/>Slack channel models-slack"]
+    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model-service or vertex-model<br/>gateway.tf, alerts.tf<br/>output ui"]
     core -->|"apply first"| dep
 
     classDef layer fill:#f8fafc,stroke:#475569,color:#111
@@ -35,8 +35,8 @@ flowchart LR
 | Folder | Content |
 |---|---|
 | `infra/core/` | Shared setup. Apply once. |
-| `infra/modules/` | `model-service` (Cloud Run) and `vertex-model` (Vertex AI) |
-| `deployments/<name>/` | One model: image, flags, gateway |
+| `infra/modules/` | `model-service` (Cloud Run), `vertex-model` (Vertex AI), `cors-proxy`, `scale-alerts` (Slack) |
+| `deployments/<name>/` | One model: image, flags, gateway, Slack alerts |
 | `scripts/` | Python helpers |
 | `ui/` | React test UI |
 

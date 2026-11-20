@@ -74,6 +74,7 @@ Levels 1 to 3 leave nothing behind, except a CPU instance that a preflight can w
 
 ## Gotchas
 
+- `verify-gcp.py` does not check the Slack alerts. After a cold start, check the log line of the alert (`infra/README.md`, "Add scale alerts to a new deployment", step 8), or ask the user if the Slack message came.
 - The gateways run in `gateway_region` (default `europe-west1` in each deployment's `variables.tf`), and the services run in `GCP_REGION`. So the gateway host names end with `europe-west1.gateway.dev`. This is expected, not drift.
 - A drift in `google_billing_budget.monthly` means `BUDGET_AMOUNT` in `.env` and the real budget differ. Either `hcp-sync.py` plus an apply of `infra/core` is pending, or someone changed the budget in the console. Ask the user which value is right.
 - `state --plan` runs `terraform init` in each root (it connects the root to its HCP workspace). That is read-only, but it writes `.terraform/` in the root.

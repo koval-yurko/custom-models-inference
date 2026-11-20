@@ -9,6 +9,8 @@ variables {
   project_id      = "p"
   billing_account = "000000-000000-000000"
   hf_token        = "test"
+  slack_bot_token = "test"
+  slack_channel   = "#models"
 }
 
 run "shared_key_targets_only_the_gateway_apis" {

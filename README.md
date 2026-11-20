@@ -31,6 +31,7 @@ Setup, once:
 
 1. Copy `.env.example` to `.env` and fill it in. Run `direnv allow`.
 2. Run `./scripts/hcp-sync.py`. Run it again after each `.env` change.
+3. For the Slack messages at scale up and scale down, set up the Slack app first: see [Scale notifications (Slack)](infra/README.md#scale-notifications-slack).
 
 Before each apply, run `./scripts/check.py` (local checks, no credentials) and `./scripts/preflight.py` (read-only checks against the real project). Fix every FAIL. The README of a deployment adds the preflight flags for that model.
 

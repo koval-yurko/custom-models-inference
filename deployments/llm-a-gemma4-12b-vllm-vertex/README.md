@@ -36,6 +36,7 @@ Do `infra/core` first (see `infra/README.md`). Run the commands from the repo ro
    ```
 
 To change the image, the args or the machine: run `./scripts/vertex.py undeploy deployments/llm-a-gemma4-12b-vllm-vertex`, then `terraform apply`, then `vertex.py deploy`.
+Do this once for a model deployed before 2026-11-20: it has container logs off, and the Slack alerts need them.
 
 ## Test
 
@@ -69,6 +70,8 @@ curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.google
 ## Check scale to zero
 
 Send no requests for about 15 minutes. Then the replica count must be `0`: open the endpoint in the console (Vertex AI > Online prediction > Endpoints) and look at the replica chart.
+
+Slack: after a cold start, the channel gets `🟢 LLM-A Gemma 4 12B is ready`. After the scale down, it gets `⚪ LLM-A Gemma 4 12B scaled to 0` (300 s idle time, then the shutdown). See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack).
 
 ## Destroy
 

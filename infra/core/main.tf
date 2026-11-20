@@ -19,6 +19,8 @@ locals {
     "aiplatform.googleapis.com",
     # Read GPU quotas (scripts/preflight.py --l4, gcloud beta quotas)
     "cloudquotas.googleapis.com",
+    # Slack notification channel and the scale alerts of the deployments.
+    "monitoring.googleapis.com",
   ]
 }
 

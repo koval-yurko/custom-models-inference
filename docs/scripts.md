@@ -4,7 +4,7 @@ All scripts are Python 3 (standard library only) in `scripts/`. They load the re
 
 | Script | Does | Changes the cloud? |
 |---|---|---|
-| `check.py` | `fmt`, `validate`, `terraform test` and `tflint` in every root. No credentials. | No |
+| `check.py` | `fmt`, `validate`, `terraform test` and `tflint` in every root. Each deployment must call `scale-alerts`. No credentials. | No |
 | `preflight.py` | Reads the real project: stale shell, HCP region variable, APIs, bucket and repo region. Flag `--weights <folder>`: weights exist. Flag `--l4`: L4 quota. | No (read-only) |
 | `hcp-sync.py` | Copies `.env` values to the HCP workspaces. Makes a missing workspace. Flag `--dry-run`. | HCP only |
 | `vertex.py deploy\|undeploy <dir>` | First fills the image cache of the `dockerhub` proxy repo (one manifest request, must give 200). Then it uploads and deploys the model on Vertex AI, or removes it. Refreshes the token on a 401. | Yes (GPU cost) |

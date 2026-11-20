@@ -48,6 +48,17 @@ sequenceDiagram
 
 Rule: retry only on a real 429. The UI does this. The loop in the deployment README does the same. The UI does not retry a network error: that error means a wrong API key, a CORS problem or a wrong URL, and a wait would not help.
 
+## Slack messages at scale up and scale down
+
+Every model sends a Slack message when it is ready after a cold start, and when it scales to 0. You do not need to watch the UI during a cold start of several minutes. A "scaled to 0" message also shows that a GPU stopped billing.
+
+| Platform | "Ready" log line | "Scaled to 0" log line |
+|---|---|---|
+| Cloud Run | `STARTUP HTTP probe succeeded` (system log) | `Application shutdown complete.` |
+| Vertex AI | The line after the model loads (`Application startup complete.` for vLLM) | `Application shutdown complete.` |
+
+The message comes less than 1 minute after the log line (measured on 2026-11-20). Setup and limits: [`infra/README.md`](../infra/README.md#scale-notifications-slack).
+
 ## Vertex AI deploy
 
 ```mermaid

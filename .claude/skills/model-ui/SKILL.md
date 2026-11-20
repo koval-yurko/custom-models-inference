@@ -48,7 +48,7 @@ output "ui" {
 
 ## Steps: new deployment with a gateway (known type: `llm`, `tts`)
 
-1. Do the gateway steps in `infra/README.md`, "Add a gateway to a new deployment".
+1. Do the gateway steps in `infra/README.md`, "Add a gateway to a new deployment". Also add `alerts.tf` ("Add scale alerts to a new deployment"); `check.py` fails without it.
 2. In `gateway.tf`, give every path an `options` operation with `security = []` (the CORS preflight has no key). Copy the pattern from `deployments/tts-a-kokoro-cpu/gateway.tf`.
 3. Check that the backend answers CORS: `OPTIONS` with `Access-Control-Allow-Origin` and `Access-Control-Allow-Headers` that allow `x-api-key`. Kokoro-FastAPI does it by default. Vertex AI does not (no `OPTIONS` answer, no CORS headers on any answer): call the module `infra/modules/cors-proxy` (see `deployments/llm-a-gemma4-12b-vllm-vertex/cors_proxy.tf`) and set the gateway backend to its URL. For a custom image on Cloud Run, add CORS middleware (FastAPI `CORSMiddleware`, origins `*`).
 4. Copy `tests/gateway.tftest.hcl`; it checks the `options` operations. Run `terraform init -backend=false && terraform test`.

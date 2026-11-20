@@ -31,6 +31,10 @@ run "defaults_scale_to_zero_on_l4" {
     error_message = "default idle time must be the 300s minimum, not the 1 h Vertex default"
   }
   assert {
+    condition     = output.vertex.deployed_model.enableContainerLogging == true && !contains(keys(output.vertex.deployed_model), "disableContainerLogging")
+    error_message = "container logs must be on: v1beta1 is off by default and needs enableContainerLogging (the scale-alerts filters read the logs)"
+  }
+  assert {
     condition     = output.vertex.deployed_model.dedicatedResources.machineSpec.machineType == "g2-standard-8" && output.vertex.deployed_model.dedicatedResources.machineSpec.acceleratorType == "NVIDIA_L4" && output.vertex.deployed_model.dedicatedResources.machineSpec.acceleratorCount == 1
     error_message = "default machine must be g2-standard-8 with 1 L4"
   }

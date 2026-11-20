@@ -5,6 +5,8 @@ variables {
   project_id      = "p"
   billing_account = "000000-000000-000000"
   hf_token        = "test"
+  slack_bot_token = "test"
+  slack_channel   = "#models"
 }
 
 run "enables_apis_needed_by_first_apply" {
@@ -17,6 +19,10 @@ run "enables_apis_needed_by_first_apply" {
   assert {
     condition     = contains(keys(google_project_service.apis), "serviceusage.googleapis.com")
     error_message = "google_project_service needs the Service Usage API"
+  }
+  assert {
+    condition     = contains(keys(google_project_service.apis), "monitoring.googleapis.com")
+    error_message = "the Slack notification channel and the scale alerts need the Monitoring API"
   }
 }
 
@@ -92,4 +98,31 @@ run "ui_bucket_is_read_only_for_the_public" {
     condition     = google_storage_bucket.models.public_access_prevention == "enforced"
     error_message = "the weights bucket must stay private"
   }
+}
+
+run "slack_channel_keeps_token_out_of_state" {
+  command = plan
+
+  assert {
+    condition     = google_monitoring_notification_channel.slack.type == "slack" && google_monitoring_notification_channel.slack.display_name == "models-slack"
+    error_message = "deployments find the Slack channel by the display name models-slack"
+  }
+  assert {
+    condition     = google_monitoring_notification_channel.slack.labels.channel_name == "#models"
+    error_message = "channel_name must come from slack_channel"
+  }
+  assert {
+    condition     = google_monitoring_notification_channel.slack.sensitive_labels[0].auth_token == null
+    error_message = "the token must go to the write-only auth_token_wo, not to auth_token (state)"
+  }
+}
+
+run "rejects_channel_without_hash" {
+  command = plan
+
+  variables {
+    slack_channel = "models"
+  }
+
+  expect_failures = [var.slack_channel]
 }

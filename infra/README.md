@@ -24,7 +24,7 @@ Contents:
 
 ## What core creates
 
-- The APIs: run, artifactregistry, cloudbuild, secretmanager, storage, compute, billingbudgets, iam, cloudresourcemanager, serviceusage, apigateway, servicemanagement, servicecontrol, apikeys, aiplatform (Vertex AI).
+- The APIs: run, artifactregistry, cloudbuild, secretmanager, storage, compute, billingbudgets, iam, cloudresourcemanager, serviceusage, apigateway, servicemanagement, servicecontrol, apikeys, aiplatform (Vertex AI), cloudquotas, monitoring.
 - The bucket `<project_id>-models` for model weights.
 - The Artifact Registry Docker repo `models` for custom images.
 - The Artifact Registry remote repo `ghcr`, a proxy for `ghcr.io`. Cloud Run cannot pull from `ghcr.io` directly.
@@ -34,6 +34,7 @@ Contents:
 - The Cloud Run job `weights-copy` and its service account. The job copies 1 Hugging Face repo into `<project_id>-models/<TARGET_DIR>/`. It can write to the weights bucket and read `hf-token`, and nothing more.
 - One API Gateway API for each entry in `local.gateway_apis` (`gateways.tf`), and a placeholder API config. A managed service can be enabled only after its API has a config, so the placeholder comes first, then the enabled service, then the key. No gateway uses the placeholder.
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
+- The Slack notification channel `models-slack` (`notifications.tf`). The deployments send their scale messages to it. See [Scale notifications (Slack)](#scale-notifications-slack).
 - The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
 All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to change it.
@@ -44,6 +45,7 @@ All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to chan
 | `weights_copy.tf` | `hf-token` secret and `weights-copy` job |
 | `gateways.tf` | Gateway APIs and the shared API key |
 | `ui.tf` | Public bucket of the test UI |
+| `notifications.tf` | Slack notification channel `models-slack` |
 
 ## First setup
 
@@ -84,6 +86,7 @@ Use these steps for each new deployment, after the one-time setup above.
 2. Run `./scripts/hcp-sync.py` in the repo root. It creates the HCP workspace with its working directory. Run it again after each `.env` change.
 3. Go to the deployment folder: `cd deployments/<name>`.
 4. Run `terraform init`, then `terraform plan` or `terraform apply`. You do not need the `direnv exec .` prefix in your own terminal. An agent shell has no direnv hook, so it needs the prefix.
+5. A new deployment needs `gateway.tf` (see [Add a gateway to a new deployment](#add-a-gateway-to-a-new-deployment)) and `alerts.tf` (see [Add scale alerts to a new deployment](#add-scale-alerts-to-a-new-deployment)).
 
 **Error `Unreadable module directory ... ../../infra`:** the workspace has no working directory. Run step 2 again.
 
@@ -475,6 +478,77 @@ Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS heade
 
 Local work: `cd ui && npm install && npm run mock` (fake TTS and LLM on port 5181 or `MOCK_PORT`, key `test`), then in a second terminal `cp public/models.mock.json public/models.json && npm run dev`.
 
+## Scale notifications (Slack)
+
+Each model sends a Slack message when it is ready after a cold start (0 to 1), and when it scales down (1 to 0). Cloud Monitoring log-based alerts watch the log line of each event. Terraform creates them once. After that, no Terraform run is needed.
+
+```mermaid
+flowchart LR
+    M["Model<br/>container"] -->|"log line"| L["Cloud<br/>Logging"] -->|"filter match"| A["Alert policy<br/>(scale-alerts)"] --> C["models-slack<br/>channel"] --> P["Slack app<br/>on the phone"]
+
+    classDef private fill:#e8f1ff,stroke:#2563eb,color:#111
+    classDef ext fill:#f3f4f6,stroke:#6b7280,color:#111
+    class M,L,A,C private
+    class P ext
+```
+
+### Set up Slack (once)
+
+1. Create a Slack app in the workspace (api.slack.com/apps, "From scratch"). Give it the bot scope `chat:write`. Install it.
+2. Put the Bot User OAuth Token (`xoxb-...`) in `SLACK_BOT_TOKEN` in `.env`. Put the channel in `SLACK_CHANNEL`, with quotes: `SLACK_CHANNEL="#models"`. Without quotes, direnv reads `#` as a comment and the value is empty.
+3. Invite the bot to the channel: `/invite @<bot name>`.
+4. In the Slack phone app, set the channel notifications to "All new messages".
+5. Run `./scripts/hcp-sync.py`. Apply `infra/core/`, then each deployment.
+6. Check the channel: in the console, open Monitoring > Alerting > Edit notification channels, and click "Send test notification" on `models-slack`. If no message comes, check that the bot is in the channel.
+
+The token is write-only (`auth_token_wo`): it is not in the Terraform state. To rotate it, change `SLACK_BOT_TOKEN`, raise `auth_token_wo_version` in `infra/core/notifications.tf`, run `hcp-sync.py` and apply core.
+
+### Module: scale-alerts
+
+One call in each deployment (`alerts.tf`) makes 2 log-based alert policies: "ready" and "down". The deployment finds the channel with the data source `google_monitoring_notification_channel` by its display name, so it does not read the core state.
+
+| Input | Content |
+|---|---|
+| `title` | Model name in the message: `🟢 <title> is ready`, `⚪ <title> scaled to 0` |
+| `resource_filter` | Log filter for this model only (Cloud Run service name or Vertex AI endpoint ID) |
+| `ready_text` | Log line after the model loads. Not the container start |
+| `down_text` | Log line at shutdown. Default `Application shutdown complete.` (uvicorn) |
+| `notification_channel` | Channel resource name |
+
+Each filter is `<resource_filter> AND (textPayload:"<text>" OR jsonPayload.message:"<text>")`. The ready lines:
+
+| Deployment | Ready line | Why this line |
+|---|---|---|
+| `tts-a-kokoro-cpu` | `STARTUP HTTP probe succeeded` (Cloud Run system log) | Uvicorn logs `Application startup complete.` before the probe passes |
+| `llm-a-gemma4-12b-vllm-vertex` | `Application startup complete.` | vLLM loads the model before it starts uvicorn |
+| `llm-b-qwen35-9b-fastapi` | `engine ready` | `image/app.py` prints it after the engine loads. Uvicorn starts first |
+
+`scripts/vertex.py` uses the Vertex AI v1beta1 API. There, container logs are off by default, and `disableContainerLogging = false` has no effect. The `vertex-model` module sets `enableContainerLogging = true`. A model deployed before 2026-11-20 has no container logs: deploy it again once.
+
+### Add scale alerts to a new deployment
+
+Every deployment must have scale alerts. `./scripts/check.py` fails for a root in `deployments/` that does not call the module `scale-alerts`.
+
+1. Copy `alerts.tf` from a deployment on the same platform: `deployments/tts-a-kokoro-cpu/` (Cloud Run) or `deployments/llm-a-gemma4-12b-vllm-vertex/` (Vertex AI).
+2. Change `title`. It is the model name in the Slack message.
+3. Keep `resource_filter`. It uses `module.service.service_name` (Cloud Run) or `module.model.endpoint_id` (Vertex AI), so it matches only this model.
+4. Set `ready_text` to the log line that the server writes after the model is loaded. Do not use a line from the container start:
+   - Cloud Run with `startup_probe_path`: `STARTUP HTTP probe succeeded`. Without a probe path, Cloud Run writes `STARTUP TCP probe succeeded`, which can come before the model is loaded.
+   - Stock vLLM: `Application startup complete.` vLLM loads the model before it starts uvicorn.
+   - An own image that loads the model in the background: print an own line after the load, as `deployments/llm-b-qwen35-9b-fastapi/image/app.py` prints `engine ready`.
+5. Keep the default `down_text` (`Application shutdown complete.`) for a server that uses uvicorn. For another server, set the line that it writes at shutdown.
+6. Copy `tests/alerts.tftest.hcl` and change the expected texts. Run `terraform init -backend=false && terraform test`.
+7. Apply `infra/core/` first, so the channel `models-slack` exists. Then apply the deployment.
+8. Check the real log lines after the first cold start: `gcloud logging read '<resource_filter> AND "<ready_text>"' --freshness=1h --limit=5`. If nothing matches, the alert never fires.
+
+### Limits
+
+- The alerts count container starts and stops, not the change 0 to 1. A scale from 1 to 2 also sends "ready". All models have a max of 1 instance now.
+- At most 1 message for each policy in 5 minutes (`notification_rate_limit`), and at most 20 incidents for each policy in a day.
+- A deploy, a new revision or a crash also starts or stops a container, so it also sends messages.
+- Slack gets no "incident closed" message (`notification_prompts = ["OPENED"]`). An incident closes itself after 30 minutes.
+- Measured on 2026-11-20: all 8 events (3 models, ready and scaled to 0) reached Slack less than 1 minute after the log line. A second "ready" for the same model 54 minutes later also arrived.
+
 ## Tests
 
 The tests use mock providers. They need no GCP credentials.
@@ -484,6 +558,7 @@ cd infra/core && terraform init -backend=false && terraform test                
 cd infra/modules/model-service && terraform init -backend=false && terraform test            # module
 cd infra/modules/vertex-model && terraform init -backend=false && terraform test             # Vertex AI module
 cd infra/modules/cors-proxy && terraform init -backend=false && terraform test               # CORS proxy module
+cd infra/modules/scale-alerts && terraform init -backend=false && terraform test             # scale alerts module
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 cd deployments/llm-b-qwen35-9b-fastapi && terraform init -backend=false && terraform test       # custom container upload spec

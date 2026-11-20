@@ -97,6 +97,8 @@ curl -sS -G "https://monitoring.googleapis.com/v3/projects/$PROJECT/timeSeries" 
 
 The newest points must show `0` (or the series has no recent points). You can also open the service in the console, go to the Metrics tab and look at "Container instance count".
 
+Slack: after a cold start, the channel gets `🟢 TTS-A Kokoro is ready`. After the scale down, it gets `⚪ TTS-A Kokoro scaled to 0` (about 15 minutes after the last request). See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack).
+
 ## Destroy
 
 ```sh

@@ -31,3 +31,20 @@ variable "hf_token" {
   ephemeral   = true
   sensitive   = true
 }
+
+variable "slack_bot_token" {
+  description = "Slack bot token (xoxb-...), scope chat:write. Ephemeral: it goes to the write-only auth_token_wo and is never stored in state or plan."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}
+
+variable "slack_channel" {
+  description = "Slack channel for the scale notifications, for example #models. The bot must be in the channel."
+  type        = string
+
+  validation {
+    condition     = startswith(var.slack_channel, "#")
+    error_message = "slack_channel must start with #, for example #models."
+  }
+}

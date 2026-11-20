@@ -15,6 +15,7 @@ The agent does not apply or destroy (see `CLAUDE.md`), unless the user asks for 
    ./scripts/check.py infra/core # one root
    ```
    Fix every FAIL before you go on. These checks find only config errors.
+   A new deployment needs `alerts.tf` (module `scale-alerts`): `check.py` fails without it. Apply `infra/core/` first, so the Slack channel `models-slack` exists. See `infra/README.md`, "Add scale alerts to a new deployment".
 2. Run the real-world checks. Use a fresh environment: a shell that started before a `.env` change has old values, and the script reports `shell is stale`.
    ```sh
    ./scripts/preflight.py --weights <folder> --l4

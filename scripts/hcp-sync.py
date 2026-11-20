@@ -40,13 +40,14 @@ COMMON = {"project_id": E("GCP_PROJECT_ID"), "region": E("GCP_REGION")}
 WORKSPACES = {
     # infra/core. The workspace keeps its old name, so the state stays.
     "custom-models-bootstrap": ("infra/core", {**COMMON, "billing_account": E("BILLING_ACCOUNT"), "budget_amount": E("BUDGET_AMOUNT"),
-                                      "hf_token": E("HF_TOKEN")}),
+                                      "hf_token": E("HF_TOKEN"),
+                                      "slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
     "custom-models-llm-a-gemma4-12b-vllm-vertex": ("deployments/llm-a-gemma4-12b-vllm-vertex", COMMON),
     "custom-models-llm-b-qwen35-9b-fastapi": ("deployments/llm-b-qwen35-9b-fastapi", COMMON),
 }
-SENSITIVE = {"hf_token", "GOOGLE_CREDENTIALS"}
+SENSITIVE = {"hf_token", "slack_bot_token", "GOOGLE_CREDENTIALS"}
 
 
 def api(method, path, body=None):

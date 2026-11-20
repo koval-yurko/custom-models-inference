@@ -37,7 +37,7 @@ Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway
    ```sh
    gcloud builds submit deployments/llm-b-qwen35-9b-fastapi/image \
      --config=deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.1 --region=$GCP_REGION
    ```
 3. Apply. It makes the endpoint, the gateway and the CORS proxy.
    ```sh
@@ -53,6 +53,7 @@ Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway
    ```
 
 To change the code: raise `image_tag` in `variables.tf`, build with the new `_TAG`, run `./scripts/vertex.py undeploy deployments/llm-b-qwen35-9b-fastapi`, then `terraform apply`, then `vertex.py deploy`.
+Do this once for a model deployed before 2026-11-20: it has container logs off, and the Slack alerts need them.
 
 ## Test
 
@@ -97,6 +98,8 @@ Write the results here after each measured cold start. "Cold start" is the time 
 ## Check scale to zero
 
 Send no requests for about 15 minutes (idle time 300 s plus the check interval). Then the replica count must be `0`: open the endpoint in the console (Vertex AI > Online prediction > Endpoints) and look at the replica chart. The next call must return `429` first.
+
+Slack: after a cold start, the channel gets `🟢 LLM-B Qwen3.5 9B is ready`. After the scale down, it gets `⚪ LLM-B Qwen3.5 9B scaled to 0` (300 s idle time, then the shutdown). See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack).
 
 ## Destroy
 

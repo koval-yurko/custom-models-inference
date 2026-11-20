@@ -46,3 +46,8 @@ output "ui_url" {
   description = "Public URL of the test UI."
   value       = "https://storage.googleapis.com/${google_storage_bucket.ui.name}/index.html"
 }
+
+output "slack_channel_id" {
+  description = "Notification channel resource name of models-slack."
+  value       = google_monitoring_notification_channel.slack.name
+}

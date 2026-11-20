@@ -24,6 +24,8 @@ locals {
   deployed_model = {
     displayName    = var.name
     serviceAccount = google_service_account.this.email
+    # v1beta1 (scripts/vertex.py) has container logs off by default; scale-alerts needs them.
+    enableContainerLogging = true
     dedicatedResources = {
       machineSpec = {
         machineType      = var.machine_type

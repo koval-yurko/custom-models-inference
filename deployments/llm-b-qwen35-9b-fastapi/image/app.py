@@ -56,6 +56,7 @@ async def load_engine():
     global engine
     try:
         engine = await asyncio.to_thread(AsyncLLM.from_engine_args, ENGINE_ARGS)
+        print("engine ready", flush=True)  # scale-alerts reads this line: uvicorn starts before the model loads
     except BaseException:  # noqa: BLE001 - exit, so the error is in the log and the container restarts
         traceback.print_exc()
         os._exit(1)
