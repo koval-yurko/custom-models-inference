@@ -112,7 +112,10 @@ export default function Stt({ model }: { model: ModelConfig }) {
     void loadFiles();
     const onHash = () => {
       const h = parseHash(location.hash);
-      if (h.tab === model.id) setFileId(h.file);
+      if (h.tab !== model.id) return;
+      // The nav link has no file id: keep the selected file and put its id back in the URL.
+      if (h.file) setFileId(h.file);
+      else if (current.current) history.replaceState(null, "", `#/${model.id}/${current.current}`);
     };
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);

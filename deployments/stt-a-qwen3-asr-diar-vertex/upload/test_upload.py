@@ -1,5 +1,7 @@
 import io
 import json
+import http.client
+import threading
 import unittest
 from datetime import datetime, timezone
 from unittest import mock
@@ -161,6 +163,8 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(a["versions"][0]["text_chars"], len("Hello there.\nHi."))
         self.assertEqual(a["versions"][0]["speakers"], 2)
         self.assertEqual(call("GET", f"/v1beta/files/{FID2}", None, store)[0], 404)
+        stored_file(store, FID2, audio=False)  # meta.json but no audio: 404, as in the list and the UI mock
+        self.assertEqual(call("GET", f"/v1beta/files/{FID2}", None, store)[0], 404)
 
     def test_read_version(self):
         store = FakeStore()
@@ -227,6 +231,23 @@ class UploadTest(unittest.TestCase):
     def test_unknown_route(self):
         self.assertEqual(call("GET", "/v1beta/nope")[0], 404)
         self.assertEqual(call("DELETE", f"/v1beta/files/{FID}")[0], 404)
+
+    def test_negative_content_length_400(self):
+        server = upload.ThreadingHTTPServer(("127.0.0.1", 0), upload.H)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            conn = http.client.HTTPConnection(*server.server_address, timeout=5)
+            conn.putrequest("POST", "/v1beta/uploads")
+            conn.putheader("Content-Length", "-1")
+            conn.endheaders()
+            r = conn.getresponse()
+            code, a = r.status, json.loads(r.read())
+            conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(code, 400)
+        self.assertIn("negative Content-Length", a["error"]["message"])
 
     def test_gcs_list_follows_pages(self):
         pages = [{"items": [{"name": "files/a"}], "nextPageToken": "t2"}, {"items": [{"name": "files/b"}]}]

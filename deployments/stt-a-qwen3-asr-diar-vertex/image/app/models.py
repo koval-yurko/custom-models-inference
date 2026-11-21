@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from google.cloud import storage
+from google.cloud.storage import transfer_manager
 
 from app.logic import Word
 
@@ -22,12 +23,12 @@ def _split_uri(uri: str) -> tuple[str, str]:
 def copy_weights(client: storage.Client, uri: str) -> None:
     """Copy gs://<models bucket>/stt-a-qwen3-asr-diar/{asr,aligner,pyannote}/ to ROOT on local disk."""
     bucket, prefix = _split_uri(uri.rstrip("/") + "/")
-    for blob in client.list_blobs(bucket, prefix=prefix):
-        if blob.name.endswith("/") or "/.cache/" in blob.name:  # .cache: leftovers of the weights-copy job
-            continue
-        dest = ROOT / blob.name[len(prefix):]
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        blob.download_to_filename(str(dest))
+    names = [b.name[len(prefix):] for b in client.list_blobs(bucket, prefix=prefix)
+             if not b.name.endswith("/") and "/.cache/" not in b.name]  # .cache: leftovers of the weights-copy job
+    # Parallel downloads cut the cold start. Threads: the work is network I/O, and no process starts before vLLM.
+    transfer_manager.download_many_to_path(client.bucket(bucket), names, destination_directory=str(ROOT),
+                                           blob_name_prefix=prefix, worker_type=transfer_manager.THREAD,
+                                           max_workers=16, raise_exception=True)
 
 
 class RealModels:

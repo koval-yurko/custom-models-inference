@@ -41,12 +41,13 @@ class Models(Protocol):
     def read_gcs(self, uri: str) -> bytes: ...
 
 
-def decode(data: bytes) -> tuple[np.ndarray, int]:
-    """Any ffmpeg format to 16 kHz mono float32. A file, not a pipe: m4a and mp4 need a seekable input."""
+def decode(data: bytes, max_seconds: float = 1801) -> tuple[np.ndarray, int]:
+    """Any ffmpeg format to 16 kHz mono float32. A file, not a pipe: m4a and mp4 need a seekable input.
+    -t stops after max_seconds (1 s over the check_duration limit), so a very long upload does not decode in full."""
     with tempfile.NamedTemporaryFile() as f:
         f.write(data)
         f.flush()
-        p = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", f.name,
+        p = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", f.name, "-t", str(max_seconds),
                             "-f", "f32le", "-ac", "1", "-ar", str(SR), "pipe:1"], capture_output=True)
     if p.returncode != 0 or not p.stdout:
         raise BadRequest(f"audio does not decode: {p.stderr.decode(errors='replace').strip()[:200]}")
@@ -89,8 +90,11 @@ def transcribe(m: Models, job: Job) -> dict:
     clips = [_cut(audio, sr, t.start, t.end) for t in turns]
     results = m.transcribe(clips, sr, language)
     texts = [text.strip() for text, _ in results]
-    words = [_word_times(m, t, c, sr, text, language or _first_name(lang))
-             for t, c, text, (_, lang) in zip(turns, clips, texts, results)]
+    if job.diarize or job.words:  # only annotations need word times: skip the aligner (GPU time) otherwise
+        words = [_word_times(m, t, c, sr, text, language or _first_name(lang))
+                 for t, c, text, (_, lang) in zip(turns, clips, texts, results)]
+    else:
+        words = [[] for _ in turns]
     return build_response(turns, texts, words, label_speakers(turns), job)
 
 
@@ -136,9 +140,9 @@ def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
                 return await asyncio.to_thread(transcribe, m, job)
         except BadRequest as e:
             return JSONResponse(error_body(str(e)), status_code=400)
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - the details go to the log only, not to the caller
             traceback.print_exc()
-            return JSONResponse(error_body(f"internal error: {e}", 500), status_code=500)
+            return JSONResponse(error_body("internal error", 500), status_code=500)
 
     return app
 

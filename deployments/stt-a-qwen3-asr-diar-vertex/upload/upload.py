@@ -6,7 +6,7 @@
 #   GET  /v1beta/files/<id>/versions/<version_id>   1 full version
 #   POST /v1beta/files/<id>/transcribe              GPU :rawPredict, then save a new version
 # It signs through the IAM Credentials signBlob API with its own service account, so it needs no key file.
-import base64, hashlib, json, os, re, secrets, time, urllib.error, urllib.request, uuid
+import base64, hashlib, json, os, re, secrets, time, traceback, urllib.error, urllib.request, uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import quote, urlencode
@@ -172,6 +172,8 @@ def route(method, path, body, store, gpu, cfg, now):
     if not ID_RE.match(fid) or (len(rest) == 3 and not VERSION_RE.match(rest[2])):
         return 400, error("bad file id or version id")
     base = f"files/{fid}/"
+    if not any(o["name"] == base + "audio" for o in store.list(base + "audio")):  # as GET /v1beta/files: no audio, no file
+        return 404, error("file not found (no audio)", 404)
     if len(rest) == 1:
         try:
             meta = json.loads(store.read(base + "meta.json"))
@@ -188,8 +190,6 @@ def route(method, path, body, store, gpu, cfg, now):
         req, settings = gpu_request(f"gs://{cfg['bucket']}/{base}audio", body)
     except ValueError as e:
         return 400, error(str(e))
-    if not any(o["name"] == base + "audio" for o in store.list(base + "audio")):
-        return 404, error("file not found (no audio)", 404)
     t, t0 = now(), time.monotonic()
     status, data = gpu(cfg["target"], req)
     if status != 200:
@@ -293,15 +293,19 @@ class H(BaseHTTPRequestHandler):
 
     def handle_call(self, method):
         try:
-            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            size = int(self.headers.get("Content-Length") or 0)
+            if size < 0:  # read(-1) waits for the end of the stream
+                raise ValueError("negative Content-Length")
+            raw = self.rfile.read(size)
             body = json.loads(raw) if raw else None
         except ValueError as e:  # bad Content-Length or bad JSON
             return self.reply(400, error(f"bad request body: {e}"))
         try:
             code, obj = route(method, self.path, body, self.store, gpu_post, self.cfg,
                               lambda: datetime.now(timezone.utc))
-        except Exception as e:  # the gateway must always get an answer with CORS headers
-            code, obj = 500, error(f"internal error: {e}", 500)
+        except Exception:  # the gateway must always get an answer with CORS headers; details go to the log only
+            traceback.print_exc()
+            code, obj = 500, error("internal error", 500)
         self.reply(code, obj)
 
     def do_GET(self):

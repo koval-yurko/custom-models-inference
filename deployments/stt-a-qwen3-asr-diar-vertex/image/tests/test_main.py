@@ -138,6 +138,23 @@ class MainTest(unittest.TestCase):
         self.assertEqual(words(r)[0], {"type": "word_info", "text": "Hello", "speaker": "spk_1",
                                        "start_offset": "0.000s", "end_offset": "1.818s"})
 
+    def test_no_annotations_skips_aligner(self):
+        m = FakeModels()
+        with ready_client(m) as c:
+            r = c.post("/v1beta/interactions", json=body({"mode": "verbatim"}))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(m.align_calls, [])
+        self.assertEqual(words(r), [])
+
+    def test_internal_error_is_generic(self):
+        m = FakeModels()
+        m.diarize = mock.Mock(side_effect=RuntimeError("secret detail"))
+        with contextlib.redirect_stderr(io.StringIO()) as err, ready_client(m) as c:
+            r = c.post("/v1beta/interactions", json=body())
+        self.assertEqual(r.status_code, 500)
+        self.assertEqual(r.json()["error"]["message"], "internal error")
+        self.assertIn("secret detail", err.getvalue())
+
     def test_bad_request(self):
         with ready_client(FakeModels()) as c:
             r = c.post("/v1beta/interactions", json=body({"mode": {"type": "smart", "diarization_mode": "speaker"}}))
@@ -155,6 +172,8 @@ class MainTest(unittest.TestCase):
         audio, sr = main.decode(buf.getvalue())
         self.assertEqual(sr, 16000)
         self.assertAlmostEqual(len(audio) / sr, 1.0, delta=0.01)
+        audio, sr = main.decode(buf.getvalue(), max_seconds=0.5)  # -t stops the decode early
+        self.assertAlmostEqual(len(audio) / sr, 0.5, delta=0.01)
         with self.assertRaises(main.BadRequest):
             main.decode(b"not audio")
 
