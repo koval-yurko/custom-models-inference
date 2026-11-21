@@ -9,7 +9,7 @@ run "custom_container_on_vertex" {
   command = apply
 
   assert {
-    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.1.2"
+    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.1.3"
     error_message = "the image must come from the models repo with the image_tag"
   }
   assert {

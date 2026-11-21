@@ -46,7 +46,7 @@ Do `infra/core` first (see `infra/README.md`). It makes the gateway API `stt-a-q
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar-vertex/image \
      --config=deployments/stt-a-qwen3-asr-diar-vertex/image/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.2 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.3 --region=$GCP_REGION
    ```
 4. Apply. It makes the endpoint, the gateway, the CORS proxy, the files service and the Slack alerts.
    ```sh
@@ -117,7 +117,11 @@ Checks only a real deploy can do (write the results here):
 | Date | Image tag | Event | Time | Notes |
 |---|---|---|---|---|
 | 2026-11-21 | 0.1.2 | First deploy (`vertex.py deploy`: model upload, node start, image pull, weights copy, model load) | 24 min (17:23 to 17:47 UTC) | Node and image pull about 18 min (first container log 17:41). Weights copy (6.5 GB to `/tmp/models`) and the load of the 3 models about 4 min: `models ready` at 17:45:01. vLLM: KV cache 3.5 GiB, `torch.compile` 41 s. |
-| - | 0.1.2 | Scale up from 0 | - | Measure on the next call at 0 replicas. |
+| 2026-11-21 | 0.1.3 | Deploy, attempt 1 (`vertex.py deploy`) | Failed after 28.5 min (22:41:31 to 23:10:05 UTC) | Node and image pull 24 min (first container log 23:05:27). The container was healthy: weights copy 67 s, `models ready` at 23:08:57, `/health` 200. Then the operation failed with code 13 "System error. Please try this operation again" and Vertex AI stopped the container. Slack got "scaled to 0" from that stop. No cause in the logs. |
+| 2026-11-21 | 0.1.3 | Deploy, attempt 2 (same command, the uploaded model is reused) | 12 min (23:10:38 to 23:22:43 UTC) | First container log after 6.4 min (the node probably had the image). Weights copy 63 s, `models ready` 3 min 42 s after the container start. |
+| - | 0.1.3 | Scale up from 0 | - | Measure on the next call at 0 replicas. |
+
+Weights copy (from the container start to the first vLLM log line): 89 s with 0.1.2 (1 file at a time), 63 to 67 s with 0.1.3 (`transfer_manager`, 16 threads). The gain is about 25 s. The node start and the image pull take most of the cold start, and the weights copy does not change them. The 0.1.3 log shows `Connection pool is full ... Connection pool size: 10`: 16 threads share 10 connections.
 
 Real-time factor (processing time / audio length) through the gateway, warm:
 

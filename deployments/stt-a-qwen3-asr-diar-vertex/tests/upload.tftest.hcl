@@ -28,7 +28,7 @@ run "upload_service" {
     condition = local.upload_env == {
       AUDIO_BUCKET = "p-stt-audio"
       SA_EMAIL     = module.upload.service_account_email
-      IMAGE_TAG    = "0.1.2"
+      IMAGE_TAG    = "0.1.3"
       TARGET       = "https://${module.model.endpoint_dns}/v1/projects/p/locations/us-central1/endpoints/${module.model.endpoint_id}:rawPredict"
     }
     error_message = "the files service needs AUDIO_BUCKET, SA_EMAIL, IMAGE_TAG and the :rawPredict TARGET"
