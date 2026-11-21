@@ -6,10 +6,12 @@ Run from anywhere:  ./scripts/ui-deploy.py [--local | --config-only]   (loads th
   --config-only  models.json + upload only models.json (after a gateway URL change: no rebuild)
   --local        models.json in ui/public only (for `cd ui && npm run dev`)
 A deployment is in the UI when its outputs.tf has `output "ui"` and its state has the output (it was applied).
+A Vertex AI deployment (it has `output "vertex"`) is in the UI only when its endpoint has a deployed model.
+scripts/vertex.py deploy and undeploy run `--config-only` at the end, so the tabs follow each change.
 Run again after every apply or scripts/gateway-streaming.py:
 both can change the gateway URL. Schema of the output: .claude/skills/model-ui/SKILL.md.
 """
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 UI = ROOT / "ui"
@@ -49,11 +51,30 @@ def run(*cmd, cwd=ROOT):
         sys.exit(f"{' '.join(cmd)} failed")
 
 
+def has_deployed_model(d, out_tf):
+    """False only when Vertex AI says the endpoint has no deployed model. Cloud Run (no vertex output): always True."""
+    if 'output "vertex"' not in out_tf:
+        return True
+    try:
+        v = json.loads(subprocess.run(["terraform", "output", "-no-color", "-json", "vertex"], cwd=d, text=True,
+                                      capture_output=True, check=True).stdout)
+        token = subprocess.run(["gcloud", "auth", "print-access-token"], text=True, capture_output=True,
+                               check=True).stdout.strip()
+        req = urllib.request.Request(f"https://{v['region']}-aiplatform.googleapis.com/v1beta1/{v['endpoint']}",
+                                     headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return bool(json.load(r).get("deployedModels"))
+    except Exception as e:  # keep the tab: a failed check must not hide a deployed model
+        print(f"warn {d.name}: cannot read the Vertex AI deploy state ({e}). Keep the tab.")
+        return True
+
+
 def collect():
     models = []
     for d in sorted((ROOT / "deployments").iterdir()):
         out = d / "outputs.tf"
-        if not out.exists() or 'output "ui"' not in out.read_text():
+        out_tf = out.read_text() if out.exists() else ""
+        if 'output "ui"' not in out_tf:
             continue
         # init is read-only here: it connects the dir to its HCP workspace (state), so `output` can read it.
         subprocess.run(["terraform", "init", "-input=false", "-no-color"], cwd=d, capture_output=True)
@@ -61,6 +82,9 @@ def collect():
         if r.returncode:
             reason = next((l for l in r.stderr.splitlines() if l.startswith("Error")), r.stderr.strip()[:200])
             print(f"skip {d.name}: {reason} (apply the deployment first: a new output is in the state only after apply)")
+            continue
+        if not has_deployed_model(d, out_tf):
+            print(f"skip {d.name}: no deployed model on the Vertex AI endpoint (run scripts/vertex.py deploy {d.relative_to(ROOT)})")
             continue
         models.append(json.loads(r.stdout))
         print(f"add  {d.name}: {models[-1]['base_url']}")

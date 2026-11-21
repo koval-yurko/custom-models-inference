@@ -5,6 +5,7 @@ Run from anywhere:  ./scripts/vertex.py deploy|undeploy deployments/<name>   (lo
 Terraform cannot do it: the provider has no resource for a custom-container model upload or for a deployed model.
 The script reads `terraform output -json vertex` and calls the Vertex AI REST API (v1beta1).
 Run `deploy` after terraform apply. Run `undeploy` before terraform destroy.
+At the end it runs `ui-deploy.py --config-only`, so the test UI shows the tab only while a model is deployed.
 """
 import json, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
 
@@ -152,3 +153,5 @@ if __name__ == "__main__":
     API = f"https://{V['region']}-aiplatform.googleapis.com/v1beta1"
     TOKEN = run("gcloud", "auth", "print-access-token")
     deploy() if sys.argv[1] == "deploy" else undeploy()
+    # The UI shows a Vertex AI tab only while its endpoint has a deployed model.
+    subprocess.run([str(ROOT / "scripts" / "ui-deploy.py"), "--config-only"], cwd=ROOT)

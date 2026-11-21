@@ -91,6 +91,7 @@ Open the printed URL and enter the key `test`. For a scripted run with evidence,
 ## Pitfalls
 
 - A new `ui` output is not in the state until the deployment is applied. `ui-deploy.py` then prints `skip <name>: Output "ui" not found`.
+- A Vertex AI deployment (it has `output "vertex"`) gets a tab only while its endpoint has a deployed model. Else `ui-deploy.py` prints `skip <name>: no deployed model`. `vertex.py deploy` and `undeploy` run `ui-deploy.py --config-only` at the end, so the tabs follow. If the Vertex AI check fails, the script prints `warn` and keeps the tab. Cloud Run models (TTS-A) always get a tab.
 - "Request ... failed. Most likely a wrong API key" in the UI: the gateway rejects a wrong key without CORS headers, so the browser hides the status. Check the key first (`terraform -chdir=infra/core output -raw api_key`). Else the preflight failed: check the `options` operation in `gateway.tf` and the backend CORS. For Vertex AI `:rawPredict`, see `infra/README.md`, "Test UI" (proxy fallback).
 - Stream playback of TTS uses `response_format = "pcm"` and Web Audio, because `MediaSource` with MP3 does not work on iOS Safari. Keep `sample_rate` right, or the audio plays at the wrong speed.
 - Browsers start audio only after a user gesture. Make a `PcmPlayer` in the click handler, before the first `await`.
