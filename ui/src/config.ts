@@ -33,3 +33,9 @@ export async function loadModels(): Promise<ModelConfig[]> {
 const KEY = "model-test-ui.api-key";
 export const getApiKey = () => localStorage.getItem(KEY) ?? "";
 export const setApiKey = (v: string) => (v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY));
+
+/** "#/<tab>/<file id>" -> the tab id and the optional file id (STT history links). */
+export function parseHash(hash: string): { tab: string; file?: string } {
+  const [tab = "", file] = hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  return file ? { tab, file } : { tab };
+}

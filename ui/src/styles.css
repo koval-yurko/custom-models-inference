@@ -50,3 +50,10 @@ audio { width: 100%; }
 .msg div { white-space: pre-wrap; }
 .msg.user { align-self: flex-end; max-width: 85%; background: color-mix(in srgb, var(--accent) 15%, transparent); padding: 6px 10px; border-radius: 8px; }
 .msg.assistant { max-width: 95%; }
+.files { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+button.link.selected { font-weight: 700; text-decoration: underline; }
+.versions { border-collapse: collapse; font-size: .85rem; width: 100%; }
+.versions th, .versions td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.transcript p { margin: 4px 0; }
+@media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }

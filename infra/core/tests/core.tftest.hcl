@@ -24,6 +24,10 @@ run "enables_apis_needed_by_first_apply" {
     condition     = contains(keys(google_project_service.apis), "monitoring.googleapis.com")
     error_message = "the Slack notification channel and the scale alerts need the Monitoring API"
   }
+  assert {
+    condition     = contains(keys(google_project_service.apis), "iamcredentials.googleapis.com")
+    error_message = "the STT-A upload service signs URLs with the IAM Credentials API (signBlob)"
+  }
 }
 
 run "budget_uses_budget_amount" {
@@ -125,4 +129,31 @@ run "rejects_channel_without_hash" {
   }
 
   expect_failures = [var.slack_channel]
+}
+
+run "stt_audio_bucket" {
+  command = plan
+
+  assert {
+    condition     = google_storage_bucket.stt_audio.name == "p-stt-audio" && google_storage_bucket.stt_audio.location == var.region
+    error_message = "the STT audio bucket must be <project_id>-stt-audio in the region"
+  }
+  assert {
+    condition     = google_storage_bucket.stt_audio.uniform_bucket_level_access && google_storage_bucket.stt_audio.public_access_prevention == "enforced" && !google_storage_bucket.stt_audio.force_destroy
+    error_message = "the STT audio bucket must be private, and a destroy must not delete the stored files"
+  }
+  assert {
+    condition     = length(google_storage_bucket.stt_audio.lifecycle_rule) == 0
+    error_message = "stored audio and transcript versions are kept forever (no lifecycle rule)"
+  }
+  assert {
+    condition = (
+      length(google_storage_bucket.stt_audio.cors) == 1
+      && google_storage_bucket.stt_audio.cors[0].method == tolist(["PUT"])
+      && google_storage_bucket.stt_audio.cors[0].origin == tolist(["*"])
+      && contains(google_storage_bucket.stt_audio.cors[0].response_header, "Content-Type")
+      && contains(google_storage_bucket.stt_audio.cors[0].response_header, "x-goog-content-length-range")
+    )
+    error_message = "the browser must be able to PUT to the signed upload URL"
+  }
 }

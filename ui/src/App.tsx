@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { getApiKey, loadModels, setApiKey, type ModelConfig } from "./config";
+import { getApiKey, loadModels, parseHash, setApiKey, type ModelConfig } from "./config";
 import { PANELS } from "./panels";
 
-const hashId = () => decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+const hashId = () => parseHash(location.hash).tab;
 
 export default function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);

@@ -44,6 +44,7 @@ output "ui" {
 | `tts` | `voices`, `default_voice` | `GET /v1/audio/voices` exists and returns `{"voices": [...]}`. |
 | `tts` | `formats`, `sample_rate` | `response_format` values; sample rate of `pcm` (16-bit mono). |
 | `llm` | `stream`, `max_tokens`, `max_context` | SSE on; default `max_tokens`; `--max-model-len`. |
+| `stt` | `max_mb` | STT-A files service (panel `Stt.tsx`): every file goes through `POST /v1beta/uploads` (signed `PUT`), then `POST /v1beta/files/<id>/transcribe`. The panel lists `GET /v1beta/files`, shows the versions of `GET /v1beta/files/<id>`, and 2 versions side by side. Link: `#/<tab>/<file id>`. `max_mb` is the inline limit of the direct `/v1beta/interactions` route, which the panel does not use. |
 | `llm-routes` | `routes`, `max_tokens` | Own JSON routes of a FastAPI app (`/extract` returns `{data}`, `/generate` returns `{text}`), panel `LlmRoutes.tsx`. Default `max_tokens`. |
 
 ## Steps: new deployment with a gateway (known type: `llm`, `tts`)
@@ -59,7 +60,7 @@ output "ui" {
 ## Steps: new model type (for example `stt`)
 
 1. Add `ui/src/panels/<Type>.tsx`. Copy the structure of `Tts.tsx`: use `call()` and `curlFor()` from `api.ts` (key, 429 retry, CORS error text), and `Timings`, `Status`, `Curl` from `components.tsx`.
-   - STT (`POST /v1/audio/transcriptions`, OpenAI-compatible): send `FormData` with `file` and `model`. Do not set `Content-Type` (the browser sets the multipart boundary). Inputs: file upload and a record button (`MediaRecorder`). On iOS Safari, `MediaRecorder` makes `audio/mp4`. Streaming (`stream=true`) returns SSE: use `readSse()` from `sse.ts`.
+   - STT with the Gemini contract exists: `Stt.tsx` (type `stt`). For an OpenAI-compatible STT (`POST /v1/audio/transcriptions`), add a new type: send `FormData` with `file` and `model`. Do not set `Content-Type` (the browser sets the multipart boundary). Inputs: file upload and a record button (`MediaRecorder`). On iOS Safari, `MediaRecorder` makes `audio/mp4`. Streaming (`stream=true`) returns SSE: use `readSse()` from `sse.ts`.
 2. Register the panel in `ui/src/panels/index.ts`.
 3. Add the type to the `features` table above.
 4. Add the routes to `ui/mock-server.mjs`, so the panel works without GCP.

@@ -2,6 +2,11 @@ output "weights_bucket" {
   value = google_storage_bucket.models.name
 }
 
+output "stt_audio_bucket" {
+  description = "Bucket of the STT-A audio files and transcript versions (files/<id>/...). Kept forever."
+  value       = google_storage_bucket.stt_audio.name
+}
+
 output "models_repo" {
   description = "Image URL prefix for custom images."
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.models.repository_id}"

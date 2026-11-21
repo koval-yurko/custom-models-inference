@@ -6,6 +6,7 @@ Terraform code that serves open-weight models as private, scale-to-zero services
 |---|---|---|
 | LLM: Gemma 4 12B (vLLM) | `deployments/llm-a-gemma4-12b-vllm-vertex` | Vertex AI, 1 L4 GPU |
 | LLM: Qwen3.5-9B FP8 (own FastAPI + vLLM image) | `deployments/llm-b-qwen35-9b-fastapi` | Vertex AI, 1 L4 GPU, no gateway yet |
+| STT: Qwen3-ASR + Pyannote speakers (own image, Gemini Transcribe API) | `deployments/stt-a-qwen3-asr-diar-vertex` | Vertex AI, 1 L4 GPU, plus a CPU upload service |
 | TTS: Kokoro | `deployments/tts-a-kokoro-cpu` | Cloud Run, CPU |
 
 A GPU replica costs about $1.34 per hour while it runs. A budget alert does not stop spend.
@@ -42,6 +43,7 @@ Steps, in this order:
 2. **Each model.** Follow the README of its folder. It has the exact commands for that model: the weights copy, the apply, the model deploy (Vertex AI), the gateway streaming and the test call.
    - [`deployments/llm-a-gemma4-12b-vllm-vertex`](deployments/llm-a-gemma4-12b-vllm-vertex/README.md)
    - [`deployments/llm-b-qwen35-9b-fastapi`](deployments/llm-b-qwen35-9b-fastapi/README.md) (also builds its image with Cloud Build)
+   - [`deployments/stt-a-qwen3-asr-diar-vertex`](deployments/stt-a-qwen3-asr-diar-vertex/README.md) (also builds its image with Cloud Build)
    - [`deployments/tts-a-kokoro-cpu`](deployments/tts-a-kokoro-cpu/README.md)
 3. **UI.** `./scripts/ui-deploy.py`. It writes `models.json`, builds the UI and uploads it. Run it after each deployment apply or `gateway-streaming.py` run, because the gateway URL can change.
 

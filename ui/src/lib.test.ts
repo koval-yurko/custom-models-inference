@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
-import { parseModels } from "./config";
+import { parseHash, parseModels } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
+import { clock, gatewayTimedOut, groupTurns, speakerCount } from "./panels/Stt";
 import { voiceIds } from "./panels/Tts";
 import { parseSse, readSse } from "./sse";
 
@@ -100,5 +101,55 @@ describe("parseSchema", () => {
     expect(parseSchema("{bad").error).toMatch(/not valid JSON/);
     expect(parseSchema("[1]").error).toMatch(/JSON object/);
     expect(parseSchema("null").error).toMatch(/JSON object/);
+  });
+});
+
+describe("groupTurns", () => {
+  const w = (text: string, speaker: string | undefined, start: string, end = start) => ({ type: "word_info", text, speaker, start_offset: start, end_offset: end });
+  it("joins words of 1 speaker in a row and starts a new group at a speaker change", () => {
+    expect(groupTurns([w("Hello", "spk_1", "0.100s", "0.300s"), w("there.", "spk_1", "0.400s", "0.800s"), w("Hi.", "spk_2", "1.000s", "1.200s"), w("Bye.", "spk_1", "2.000s", "2.500s")])).toEqual([
+      { speaker: "spk_1", text: "Hello there.", start: "0.100s", end: "0.800s" },
+      { speaker: "spk_2", text: "Hi.", start: "1.000s", end: "1.200s" },
+      { speaker: "spk_1", text: "Bye.", start: "2.000s", end: "2.500s" },
+    ]);
+  });
+  it("gives 1 group without a speaker when diarization is off, and none for no words", () => {
+    expect(groupTurns([w("a", undefined, "0.000s"), w("b", undefined, "0.500s", "0.900s")])).toEqual([{ speaker: "", text: "a b", start: "0.000s", end: "0.900s" }]);
+    expect(groupTurns([])).toEqual([]);
+  });
+});
+
+describe("parseHash", () => {
+  it("splits the tab and the file id", () => {
+    expect(parseHash("#/stt-mock/0b8e3f6a-1c2d-4e5f-8a9b-0c1d2e3f4a5b")).toEqual({ tab: "stt-mock", file: "0b8e3f6a-1c2d-4e5f-8a9b-0c1d2e3f4a5b" });
+    expect(parseHash("#/tts-mock")).toEqual({ tab: "tts-mock" });
+    expect(parseHash("")).toEqual({ tab: "" });
+    expect(parseHash("#/a%20b")).toEqual({ tab: "a b" });
+  });
+});
+
+describe("speakerCount", () => {
+  const w = (speaker?: string) => ({ type: "word_info", text: "x", speaker, start_offset: "0s", end_offset: "0s" });
+  it("counts distinct speakers", () => {
+    expect(speakerCount([w("spk_1"), w("spk_2"), w("spk_1")])).toBe(2);
+    expect(speakerCount([w(), w()])).toBe(0);
+  });
+});
+
+describe("gatewayTimedOut", () => {
+  it("is a 504, or a blocked answer (no status) after about 300 s", () => {
+    expect(gatewayTimedOut(504, 1000)).toBe(true);
+    expect(gatewayTimedOut(undefined, 295_000)).toBe(true);
+    expect(gatewayTimedOut(undefined, 5_000)).toBe(false);
+    expect(gatewayTimedOut(200, 400_000)).toBe(false);
+  });
+});
+
+describe("clock", () => {
+  it("turns a Gemini offset into hh:mm:ss", () => {
+    expect(clock("8.958s")).toBe("00:00:08");
+    expect(clock("0.031s")).toBe("00:00:00");
+    expect(clock("125.5s")).toBe("00:02:05");
+    expect(clock("3725s")).toBe("01:02:05");
   });
 });

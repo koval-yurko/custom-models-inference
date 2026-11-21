@@ -1,15 +1,30 @@
-// Local stand-in for the model gateways (TTS, LLM), for UI work without GCP: npm run mock (port 5181 or MOCK_PORT, key "test").
+// Local stand-in for the model gateways (TTS, LLM, STT), for UI work without GCP: npm run mock (port 5181 or MOCK_PORT, key "test").
 // It answers the CORS preflight like Kokoro and vLLM do. Extend it when you add a panel for a new type.
 import http from "node:http";
+const files = new Map(); // STT-A mock store: id -> {meta..., audio, versions}
+// A fixed 2-speaker answer in the GPU service shape (app/logic.py). run > 0 marks a saved version, so 2 versions differ.
+function gemini(j, run = 0) {
+  const diar = j.generation_config?.transcription_config?.mode?.diarization_mode === "speaker";
+  const turns = [["spk_1", 0.1, `Hello there, this is the mock${run ? ` run ${run}` : ""}.`], ["spk_2", 2.5, `Hi! The input was ${j.input?.[0]?.type}.`], ["spk_1", 5.0, "Goodbye."]];
+  const annotations = turns.flatMap(([spk, t0, text]) => text.split(" ").map((w, i) => ({ type: "word_info", text: w, ...(diar ? { speaker: spk } : {}), start_offset: `${(t0 + i * 0.4).toFixed(3)}s`, end_offset: `${(t0 + i * 0.4 + 0.35).toFixed(3)}s` })));
+  const text = turns.map((x) => x[2]).join("\n");
+  return { id: crypto.randomUUID(), status: "completed", model: "qwen3-asr-diar", output_text: text, steps: [{ type: "model_output", content: [{ type: "text", text, annotations }] }] };
+}
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "*" };
 http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(200, cors); return res.end(); }
+  if (req.method === "PUT" && req.url.startsWith("/mock-upload/")) { // the signed URL of /v1beta/uploads: no API key, like GCS
+    let n = 0; for await (const c of req) n += c.length;
+    const f = files.get(req.url.split("/")[2]); if (f) f.audio = true;
+    console.log(new Date().toISOString(), req.method, req.url, `${n} bytes`, req.headers["content-type"]);
+    res.writeHead(200, cors); return res.end();
+  }
   if (req.headers["x-api-key"] !== "test") {
     console.log(new Date().toISOString(), req.method, req.url, "403 bad key");
     res.writeHead(403, cors); return res.end("bad key");
   }
   let body = ""; for await (const c of req) body += c; const j = body ? JSON.parse(body) : {};
-  console.log(new Date().toISOString(), req.method, req.url, body); // request log: proof that the UI call reached the mock
+  console.log(new Date().toISOString(), req.method, req.url, body.length > 2000 ? `${body.slice(0, 200)}… (${body.length} chars)` : body); // request log: proof that the UI call reached the mock
   if (req.url === "/v1/audio/voices") { // Kokoro shape
     res.writeHead(200, { ...cors, "Content-Type": "application/json" });
     return res.end(JSON.stringify({ voices: [{ id: "af_heart", name: "af_heart" }, { id: "am_adam", name: "am_adam" }] }));
@@ -36,6 +51,28 @@ http.createServer(async (req, res) => {
   if (req.url === "/generate") {
     res.writeHead(200, { ...cors, "Content-Type": "application/json" });
     return res.end(JSON.stringify({ text: `Echo: ${j.prompt}` }));
+  }
+  const json = (code, obj) => (res.writeHead(code, { ...cors, "Content-Type": "application/json" }), res.end(JSON.stringify(obj)));
+  if (req.url === "/v1beta/uploads") { // STT-A files service shape
+    const id = crypto.randomUUID(), port = process.env.MOCK_PORT ?? 5181;
+    files.set(id, { id, name: j.name, mime_type: j.mime_type, size_bytes: j.size_bytes, created: new Date().toISOString().slice(0, 19) + "Z", audio: false, versions: [] });
+    return json(200, { id, upload_url: `http://localhost:${port}/mock-upload/${id}`, method: "PUT",
+      headers: { "Content-Type": j.mime_type, "x-goog-content-length-range": `0,${j.size_bytes}` }, file_uri: `gs://mock-stt-audio/files/${id}/audio`, expires_in: 900 });
+  }
+  if (req.url === "/v1beta/interactions") return json(200, gemini(j)); // the direct route: nothing is saved
+  const m = req.url.match(/^\/v1beta\/files(?:\/([^/]+)(?:\/(transcribe|versions)(?:\/([^/]+))?)?)?$/);
+  if (m) { // STT-A files service: list, 1 file, 1 version, transcribe again (kept in memory)
+    const [, id, op, vid] = m, f = files.get(id);
+    if (!id) return json(200, { files: [...files.values()].filter((x) => x.audio).reverse().map(({ audio, versions, ...x }) => ({ ...x, versions: versions.length, latest: versions.at(-1)?.id ?? null })) });
+    if (!f || !f.audio) return json(404, { error: { code: 404, message: "file not found", status: "NOT_FOUND" } });
+    if (!op) { const { audio, versions, ...file } = f; return json(200, { file, versions: [...versions].reverse().map(({ response, ...v }) => ({ ...v, text_chars: response.output_text.length, speakers: 2 })) }); }
+    if (op === "versions") { const v = f.versions.find((x) => x.id === vid); return v ? json(200, v) : json(404, { error: { code: 404, message: "version not found", status: "NOT_FOUND" } }); }
+    const now = new Date(), stamp = now.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+    const v = { id: `${stamp}-${crypto.randomUUID().slice(0, 4)}`, file_id: id, created: now.toISOString().slice(0, 19) + "Z", label: j.label ?? "", image_tag: "mock",
+      settings: { language_codes: j.language_codes ?? [], diarization: !!j.diarization }, run_seconds: 0.3,
+      response: gemini({ input: [{ type: "file" }], generation_config: { transcription_config: { mode: j.diarization ? { diarization_mode: "speaker" } : {} } } }, f.versions.length + 1) };
+    f.versions.push(v);
+    return json(201, v);
   }
   res.writeHead(404, cors); res.end();
 }).listen(Number(process.env.MOCK_PORT ?? 5181), () => console.log(`mock ready on ${process.env.MOCK_PORT ?? 5181}`));

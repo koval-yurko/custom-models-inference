@@ -6,7 +6,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - `./scripts/verify-ui.py up` printed `READY` and `./scripts/verify-ui.py doctor` passes.
 - The UI is at `ui_url` and the mock at `mock_url` from `.verify/ui/current.json`. Ports change on every run.
-- The mock config has 3 tabs: `tts-mock` (type `tts`), `llm-mock` (type `llm`), `stt-mock` (type `stt`, no panel yet). All point to the mock.
+- The mock config has 3 tabs: `tts-mock` (type `tts`), `llm-mock` (type `llm`), `stt-mock` (type `stt`, STT-A mock). All point to the mock.
 - The mock accepts only the API key `test`. A new run starts with no key in the browser.
 - Never drive an instance that this run did not start.
 
@@ -41,4 +41,5 @@ Each feature file starts with an H1 title and one paragraph about the user-visib
 - [LLM chat](./llm-chat.md) covers send by button and by Enter, streaming and non-streaming answers, timings, curl, stop and new chat. Its `llm-send-button` and `llm-send-enter` paths were proved end to end on 2026-11-14.
 - [TTS speech](./tts-speech.md) covers voices, full-file and streamed audio, download and timings. All recipe steps were driven on 2026-11-14.
 - [API key](./api-key.md) covers entering, showing, clearing and persisting the key, and the wrong-key error. All recipe steps were driven on 2026-11-14.
+- [STT transcribe and history](./stt-transcribe.md) covers upload, the first version, transcribe again with a label, 2 versions side by side and the file link. All recipe steps were driven on 2026-11-21.
 - [Model tabs](./model-tabs.md) covers tabs from `models.json`, hash routes, kept panel state and the "no panel" message. All recipe steps except `tabs-bad-config` were driven on 2026-11-14.

@@ -17,6 +17,10 @@ run "shared_key_targets_only_the_gateway_apis" {
   command = apply
 
   assert {
+    condition     = contains(local.gateway_apis, "stt-a-qwen3-asr-diar")
+    error_message = "the STT-A gateway API must be in local.gateway_apis"
+  }
+  assert {
     condition     = length(google_apikeys_key.gateways) == 1 && length(google_apikeys_key.gateways[0].restrictions) == 1
     error_message = "there must be one restricted key"
   }

@@ -10,7 +10,7 @@ Exit 1 on a FAIL. A WARN means the script could not check.
 import argparse, json, os, pathlib, re, subprocess, sys, urllib.error, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-NEEDED_APIS = ["aiplatform", "run", "artifactregistry", "storage", "apigateway", "secretmanager", "apikeys"]
+NEEDED_APIS = ["aiplatform", "run", "artifactregistry", "storage", "apigateway", "secretmanager", "apikeys", "iamcredentials"]
 results = []
 
 

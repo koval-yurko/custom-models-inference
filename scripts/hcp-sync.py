@@ -46,6 +46,7 @@ WORKSPACES = {
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
     "custom-models-llm-a-gemma4-12b-vllm-vertex": ("deployments/llm-a-gemma4-12b-vllm-vertex", COMMON),
     "custom-models-llm-b-qwen35-9b-fastapi": ("deployments/llm-b-qwen35-9b-fastapi", COMMON),
+    "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar-vertex", COMMON),
 }
 SENSITIVE = {"hf_token", "slack_bot_token", "GOOGLE_CREDENTIALS"}
 

@@ -55,7 +55,7 @@ Deploy 4 speech services. Each one gets its own folder.
 
 | ID | Folder | Model | Server | Hardware | Why |
 |---|---|---|---|---|---|
-| STT-A | `deployments/stt-a-qwen3-asr-vllm/` | Qwen3-ASR-1.7B | stock `vllm/vllm-openai` | L4 | Most accurate. Same image and module as LLM A. Only flags change. |
+| STT-A | `deployments/stt-a-qwen3-asr-diar-vertex/` | Qwen3-ASR-1.7B + ForcedAligner + Pyannote | own image (`vllm/vllm-openai:v0.14.0` base) | L4 | Most accurate. Replaced on 2026-11-20 by the diarization design (`docs/specs/2026-11-21-stt-a-design.md`): speakers per word, Gemini Transcribe API. |
 | STT-B | `deployments/stt-b-whisper-turbo-fastapi/` | Whisper large-v3-turbo | custom image: faster-whisper + FastAPI | L4 | Custom container example for speech. 99 languages. Room for custom code (VAD, word timestamps, diarization). |
 | TTS-A | `deployments/tts-a-kokoro-cpu/` | Kokoro-82M | stock `ghcr.io/remsky/kokoro-fastapi-cpu` | CPU only (no GPU) | Cheapest. Fast cold start. Shows a deployment without a GPU. |
 | TTS-B | `deployments/tts-b-qwen3-tts-vllm-omni/` | Qwen3-TTS-1.7B | vLLM-Omni image (`--omni`) | L4 | Voice cloning and streaming. Apache 2.0. |

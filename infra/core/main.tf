@@ -21,6 +21,8 @@ locals {
     "cloudquotas.googleapis.com",
     # Slack notification channel and the scale alerts of the deployments.
     "monitoring.googleapis.com",
+    # signBlob for the signed upload URLs of STT-A (deployments/stt-a-qwen3-asr-diar-vertex/upload)
+    "iamcredentials.googleapis.com",
   ]
 }
 
@@ -45,6 +47,27 @@ resource "google_storage_bucket" "models" {
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
+
+  depends_on = [google_project_service.apis]
+}
+
+# STT-A audio files and transcript versions (files/<id>/...). The files service gives signed PUT URLs.
+resource "google_storage_bucket" "stt_audio" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-stt-audio"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  # Stored audio and transcript versions are kept forever (STT-A history). A destroy must not delete them.
+  force_destroy = false
+
+  # The browser sends the file straight to the signed URL.
+  cors {
+    origin          = ["*"]
+    method          = ["PUT"]
+    response_header = ["Content-Type", "x-goog-content-length-range"]
+    max_age_seconds = 600
+  }
 
   depends_on = [google_project_service.apis]
 }
