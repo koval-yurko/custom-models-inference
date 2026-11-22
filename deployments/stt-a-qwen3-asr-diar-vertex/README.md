@@ -19,7 +19,9 @@ Speech to text with a speaker for each word, behind the Gemini 3.5 Transcribe co
 | `POST /v1beta/uploads` | `{"name": "a.mp3", "mime_type": "audio/mpeg", "size_bytes": 123}` | `id`, `upload_url`, `method`, `headers`, `file_uri`, `expires_in` |
 | `GET /v1beta/files` | - | `{"files": [{"id", "name", "mime_type", "size_bytes", "created", "versions", "latest"}]}`, newest first |
 | `GET /v1beta/files/<id>` | - | `{"file", "versions": [...]}`: version summaries, newest first |
-| `GET /v1beta/files/<id>/versions/<version_id>` | - | 1 full version: `label`, `image_tag`, `settings`, `run_seconds`, `response` |
+| `GET /v1beta/files/<id>/versions/<version_id>` | - | 1 full version: `label`, `image_tag`, `settings`, `run_seconds`, `response`, plus `names` (`{}` when none) |
+| `PUT /v1beta/files/<id>/versions/<version_id>/names` | `{"spk_1": "Alice"}`: at most 8 keys `spk_<n>`, names 1 to 40 chars | `{"names": {...}}`. Replaces all names of that version. `{}` removes them |
+| `GET /v1beta/files/<id>/audio` | - | `{"url", "mime_type", "expires_in": 900}`: a signed `GET` URL of the audio, for playback |
 | `POST /v1beta/files/<id>/transcribe` | `{"language_codes"?: ["en"], "diarization"?: true, "label"?: "..."}` | `201` with the new version. A GPU `429` (cold start) or error comes back as is, and nothing is saved |
 
 Limits: 30 minutes of audio, 20 MB inline, 8 speakers, 600 s of GPU time per request (Vertex AI endpoint timeout). Errors are HTTP 400 with `{"error": {"code", "message", "status"}}`.

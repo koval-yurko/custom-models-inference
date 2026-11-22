@@ -16,7 +16,8 @@ export interface WordInfo {
 }
 interface FileRow { id: string; name: string; mime_type: string; size_bytes: number; created: string; versions: number; latest: string | null }
 interface Summary { id: string; created: string; label: string; image_tag: string; run_seconds: number; settings: { language_codes: string[]; diarization: boolean }; text_chars: number; speakers: number }
-interface Version extends Omit<Summary, "text_chars" | "speakers"> { response: { output_text?: string; steps?: { content?: { annotations?: WordInfo[] }[] }[] } }
+type Names = Record<string, string>; // per version: {"spk_1": "Alice"} (PUT .../versions/<id>/names)
+interface Version extends Omit<Summary, "text_chars" | "speakers"> { names?: Names; response: { output_text?: string; steps?: { content?: { annotations?: WordInfo[] }[] }[] } }
 
 const LANGS = ["zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja", "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "hu", "mk", "ro"];
 // The files service accepts only these types. Browsers give other names (audio/x-m4a) or none.
@@ -46,6 +47,12 @@ export function clock(offset: string): string {
   return [t / 3600, (t / 60) % 60, t % 60].map((n) => String(Math.floor(n)).padStart(2, "0")).join(":");
 }
 
+/** The given name of a speaker label, else the label. Words without a speaker show as "text". */
+export const speakerName = (names: Names | undefined, speaker: string) => names?.[speaker] || speaker || "text";
+
+/** Draft names -> the PUT body: trimmed, empty names left out (the label shows again). */
+export const namesBody = (draft: Names): Names => Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+
 export const speakerCount = (annotations: WordInfo[]) => new Set(annotations.map((w) => w.speaker).filter(Boolean)).size;
 
 const mimeOf = (f: File) => MIME[f.name.split(".").pop()?.toLowerCase() ?? ""] ?? (f.type || "audio/wav");
@@ -53,19 +60,48 @@ const words = (v: Version) => v.response.steps?.[0]?.content?.[0]?.annotations ?
 const when = (iso: string) => iso.replace("T", " ").replace(/:\d\dZ$/, "");
 const vtime = (id: string) => `${id.slice(0, 4)}-${id.slice(4, 6)}-${id.slice(6, 8)} ${id.slice(9, 11)}:${id.slice(11, 13)}`;
 
-function Transcript({ v }: { v: Version }) {
+interface TranscriptProps {
+  v: Version;
+  playing?: number; // index of the turn that plays now
+  onPlay: (turn: number, start: number, end: number) => void;
+  onNames: (names: Names) => Promise<void>;
+}
+
+function Transcript({ v, playing, onPlay, onNames }: TranscriptProps) {
   const groups = groupTurns(words(v));
   const speakers = [...new Set(groups.map((g) => g.speaker))];
+  const labels = speakers.filter(Boolean);
+  const [draft, setDraft] = useState<Names>(v.names ?? {});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft(v.names ?? {}), [v.names]);
+  const color = (spk: string) => COLORS[speakers.indexOf(spk) % COLORS.length];
+  const save = () => (setSaving(true), onNames(namesBody(draft)).finally(() => setSaving(false)));
   return (
     <div className="transcript">
       <p className="muted">
         {vtime(v.id)} · image {v.image_tag} · {v.label || "no label"}
       </p>
+      {labels.length > 0 && (
+        <div className="row speakers">
+          {labels.map((spk) => (
+            <label key={spk} style={{ color: color(spk) }}>
+              {spk}
+              <input aria-label={`Name of ${spk}`} value={draft[spk] ?? ""} maxLength={40} placeholder={spk} onChange={(e) => setDraft({ ...draft, [spk]: e.target.value })} />
+            </label>
+          ))}
+          <button disabled={saving} onClick={() => void save()}>
+            Save names
+          </button>
+        </div>
+      )}
       {groups.length === 0 && <p>{v.response.output_text || "(no speech)"}</p>}
       {groups.map((g, i) => (
-        <p key={i}>
-          <span style={{ color: COLORS[speakers.indexOf(g.speaker) % COLORS.length], fontWeight: 600 }}>
-            {g.speaker || "text"} {clock(g.start)} – {clock(g.end)}
+        <p key={i} className={playing === i ? "turn playing" : "turn"}>
+          <button className="play" aria-label={`${playing === i ? "Stop" : "Play"} turn ${i + 1}`} onClick={() => onPlay(i, parseFloat(g.start), parseFloat(g.end))}>
+            {playing === i ? "■" : "▶"}
+          </button>{" "}
+          <span style={{ color: color(g.speaker), fontWeight: 600 }}>
+            {speakerName(v.names, g.speaker)} {clock(g.start)} – {clock(g.end)}
           </span>{" "}
           {g.text}
         </p>
@@ -89,6 +125,11 @@ export default function Stt({ model }: { model: ModelConfig }) {
   const [error, setError] = useState<string>();
   const [curl, setCurl] = useState("");
   const abort = useRef<AbortController>(null);
+  // 1 <audio> for all turns. The signed GET URL lasts 15 minutes, so it is fetched again after 10 minutes.
+  const audio = useRef<HTMLAudioElement>(null);
+  const audioSrc = useRef<{ file: string; at: number }>(null);
+  const stopAt = useRef(0);
+  const [playing, setPlaying] = useState<{ version: string; turn: number }>();
   const current = useRef(fileId); // the selected file: a late answer for another file must not show
   current.current = fileId;
 
@@ -122,6 +163,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
   }, [model.base_url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    audio.current?.pause();
     setDetail(undefined);
     setTicked([]);
     if (fileId) void loadDetail(fileId);
@@ -133,6 +175,42 @@ export default function Stt({ model }: { model: ModelConfig }) {
     for (const id of ticked.filter((id) => !full[id]))
       get<Version>(`/v1beta/files/${fileId}/versions/${id}`).then((v) => setFull((f) => ({ ...f, [id]: v })), (e) => setError(String(e)));
   }, [ticked, fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const play = async (version: string, turn: number, start: number, end: number) => {
+    const a = audio.current;
+    if (!a || !fileId) return;
+    if (playing?.version === version && playing.turn === turn) return a.pause();
+    try {
+      if (audioSrc.current?.file !== fileId || performance.now() - audioSrc.current.at > 600_000) {
+        const d = await get<{ url: string }>(`/v1beta/files/${fileId}/audio`);
+        a.src = d.url;
+        audioSrc.current = { file: fileId, at: performance.now() };
+      }
+      stopAt.current = end;
+      a.currentTime = start;
+      setPlaying({ version, turn });
+      await a.play();
+    } catch (e) {
+      setPlaying(undefined);
+      setError(String(e));
+    }
+  };
+  // timeupdate comes about every 250 ms in Chrome, so a frame loop stops the turn on time; timeupdate covers a hidden tab.
+  const checkEnd = () => {
+    const a = audio.current;
+    if (a && !a.paused && a.currentTime >= stopAt.current) a.pause();
+  };
+  const watch = () => {
+    checkEnd();
+    if (audio.current && !audio.current.paused) requestAnimationFrame(watch);
+  };
+
+  const saveNames = async (version: string, names: Names) => {
+    const res = await call(model, `/v1beta/files/${fileId}/versions/${version}/names`, { method: "PUT", headers: JSON_HDR, body: JSON.stringify(names) });
+    if (!res.ok) return setError(`Names: ${await errorText(res)}`);
+    const d: { names: Names } = await res.json();
+    setFull((f) => (f[version] ? { ...f, [version]: { ...f[version], names: d.names } } : f));
+  };
 
   const open = (id: string) => (location.hash = `#/${model.id}/${id}`);
   const tick = (id: string) => setTicked((old) => (old.includes(id) ? old.filter((x) => x !== id) : [...old, id].slice(-2)));
@@ -283,9 +361,16 @@ export default function Stt({ model }: { model: ModelConfig }) {
         {busy && !retry && <p className="info">{busy}</p>}
         <div className={shown.length === 2 ? "compare" : ""}>
           {shown.map((v) => (
-            <Transcript key={v.id} v={v} />
+            <Transcript
+              key={v.id}
+              v={v}
+              playing={playing?.version === v.id ? playing.turn : undefined}
+              onPlay={(turn, start, end) => void play(v.id, turn, start, end)}
+              onNames={(names) => saveNames(v.id, names)}
+            />
           ))}
         </div>
+        <audio ref={audio} hidden onPlaying={watch} onTimeUpdate={checkEnd} onPause={() => setPlaying(undefined)} onEnded={() => setPlaying(undefined)} onError={() => (setPlaying(undefined), audio.current?.src && setError("The audio cannot play in this browser."))} />
         <Timings t={t} firstLabel="Upload done" />
         <Curl text={curl} />
       </div>

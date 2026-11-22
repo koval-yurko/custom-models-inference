@@ -17,7 +17,7 @@ run "gateway_requires_api_key" {
     error_message = "only the OPTIONS (CORS preflight) operations may override the global security"
   }
   assert {
-    condition     = join(",", sort(keys(local.openapi.paths))) == "/v1beta/files,/v1beta/files/{id},/v1beta/files/{id}/transcribe,/v1beta/files/{id}/versions/{version_id},/v1beta/interactions,/v1beta/uploads"
+    condition     = join(",", sort(keys(local.openapi.paths))) == "/v1beta/files,/v1beta/files/{id},/v1beta/files/{id}/audio,/v1beta/files/{id}/transcribe,/v1beta/files/{id}/versions/{version_id},/v1beta/files/{id}/versions/{version_id}/names,/v1beta/interactions,/v1beta/uploads"
     error_message = "the gateway must expose only the interactions, uploads and files paths (/health stays private)"
   }
   assert {
@@ -32,19 +32,21 @@ run "gateway_requires_api_key" {
       && local.openapi.paths["/v1beta/files"].get["x-google-backend"].deadline == 30
       && local.openapi.paths["/v1beta/files/{id}"].get["x-google-backend"].deadline == 30
       && local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"].get["x-google-backend"].deadline == 30
+      && local.openapi.paths["/v1beta/files/{id}/audio"].get["x-google-backend"].deadline == 30
+      && local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/names"].put["x-google-backend"].deadline == 30
     )
     error_message = "transcribe waits up to 300 s, the other files routes 30 s"
   }
   assert {
     condition = alltrue([
-      for op in values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"]) :
+      for op in concat(values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"]), values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/names"])) :
       toset([for p in op.parameters : "${p.name}:${p["in"]}:${p.required}:${p.type}"]) == toset(["id:path:true:string", "version_id:path:true:string"])
     ])
     error_message = "the path parameters id and version_id must be declared on each operation"
   }
   assert {
     condition = alltrue([
-      for path in ["/v1beta/files/{id}", "/v1beta/files/{id}/transcribe"] : alltrue([
+      for path in ["/v1beta/files/{id}", "/v1beta/files/{id}/transcribe", "/v1beta/files/{id}/audio"] : alltrue([
         for op in values(local.openapi.paths[path]) : [for p in op.parameters : p.name] == ["id"]
       ])
     ])

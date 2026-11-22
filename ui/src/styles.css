@@ -56,4 +56,9 @@ button.link.selected { font-weight: 700; text-decoration: underline; }
 .versions th, .versions td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; }
 .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .transcript p { margin: 4px 0; }
+.transcript .turn { padding: 2px 4px; border-radius: 4px; }
+.transcript .turn.playing { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.transcript button.play { padding: 0 6px; font-size: .75rem; line-height: 1.6; }
+.speakers label { font-weight: 600; }
+.speakers input { width: 120px; font-weight: normal; }
 @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }

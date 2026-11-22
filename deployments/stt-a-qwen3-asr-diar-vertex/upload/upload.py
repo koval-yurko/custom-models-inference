@@ -5,6 +5,8 @@
 #   GET  /v1beta/files/<id>                         1 file and its version summaries
 #   GET  /v1beta/files/<id>/versions/<version_id>   1 full version
 #   POST /v1beta/files/<id>/transcribe              GPU :rawPredict, then save a new version
+#   PUT  /v1beta/files/<id>/versions/<version_id>/names   speaker names of 1 version ({"spk_1": "Alice"})
+#   GET  /v1beta/files/<id>/audio                   signed GET URL of the audio (playback in the browser)
 # It signs through the IAM Credentials signBlob API with its own service account, so it needs no key file.
 import base64, hashlib, json, os, re, secrets, time, traceback, urllib.error, urllib.request, uuid
 from datetime import datetime, timezone
@@ -16,14 +18,16 @@ AUDIO_TYPES = frozenset({"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "a
 MAX_BYTES = 500_000_000
 MAX_TEXT = 200
 EXPIRES = 900
+MAX_NAMES, MAX_NAME = 8, 40
 GPU_TIMEOUT = 900  # the Vertex AI endpoint stops a request at 600 s (spec fact 10)
 HOST = "storage.googleapis.com"
-SIGNED = "content-type;host;x-goog-content-length-range"
 ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 VERSION_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{4}$")
+SPEAKER_RE = re.compile(r"^spk_\d{1,2}$")
+NAMES = ".names.json"  # files/<id>/versions/<version_id>.names.json, next to the version JSON
 CORS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "content-type, x-api-key, authorization",
     "Access-Control-Max-Age": "600",
 }
@@ -55,19 +59,29 @@ def check_request(body):
 
 
 def signed_put(bucket, name, mime, size, sa_email, now, sign):
-    """GCS V4 signing: canonical request -> string to sign -> hex of the RSA signature."""
+    return _signed("PUT", bucket, name, {"content-type": mime, "host": HOST, "x-goog-content-length-range": f"0,{size}"},
+                   sa_email, now, sign)
+
+
+def signed_get(bucket, name, sa_email, now, sign):
+    return _signed("GET", bucket, name, {"host": HOST}, sa_email, now, sign)
+
+
+def _signed(method, bucket, name, headers, sa_email, now, sign):
+    """GCS V4 signing: canonical request -> string to sign -> hex of the RSA signature. headers: lower-case names."""
     stamp, day = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    signed = ";".join(sorted(headers))
     scope = f"{day}/auto/storage/goog4_request"
     query = "&".join(f"{k}={quote(v, safe='-_.~')}" for k, v in sorted({
         "X-Goog-Algorithm": "GOOG4-RSA-SHA256",
         "X-Goog-Credential": f"{sa_email}/{scope}",
         "X-Goog-Date": stamp,
         "X-Goog-Expires": str(EXPIRES),
-        "X-Goog-SignedHeaders": SIGNED,
+        "X-Goog-SignedHeaders": signed,
     }.items()))
     path = f"/{bucket}/{quote(name, safe='/-_.~')}"
-    canonical = "\n".join(["PUT", path, query, f"content-type:{mime}", f"host:{HOST}",
-                           f"x-goog-content-length-range:0,{size}", "", SIGNED, "UNSIGNED-PAYLOAD"])
+    canonical = "\n".join([method, path, query, *(f"{k}:{headers[k]}" for k in sorted(headers)), "", signed,
+                           "UNSIGNED-PAYLOAD"])
     to_sign = "\n".join(["GOOG4-RSA-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()])
     return f"https://{HOST}{path}?{query}&X-Goog-Signature={sign(to_sign.encode()).hex()}"
 
@@ -130,13 +144,27 @@ def list_files(objects):
             f["meta"] = o.get("metadata") or {}
         elif parts[2] == "audio" and len(parts) == 3:
             f["size"] = int(o.get("size", 0))
-        elif parts[2] == "versions" and len(parts) == 4 and parts[3].endswith(".json"):
+        elif parts[2] == "versions" and len(parts) == 4 and parts[3].endswith(".json") and not parts[3].endswith(NAMES):
             f["versions"].append(parts[3][:-5])
     rows = [{"id": fid, "name": f["meta"].get("name", ""), "mime_type": f["meta"].get("mime_type", ""),
              "size_bytes": f["size"], "created": f["meta"].get("created", ""), "versions": len(f["versions"]),
              "latest": max(f["versions"], default=None)}
             for fid, f in files.items() if "meta" in f and "size" in f]
     return sorted(rows, key=lambda r: r["created"], reverse=True)
+
+
+def check_names(body):
+    """{"spk_1": "Alice"}: at most 8 speaker labels, each name 1 to 40 chars after strip. {} removes all names."""
+    if not isinstance(body, dict) or len(body) > MAX_NAMES:
+        raise ValueError(f"body must be a JSON object with at most {MAX_NAMES} keys")
+    out = {}
+    for k, v in body.items():
+        if not SPEAKER_RE.match(k):
+            raise ValueError(f"bad speaker label {k!r}: use spk_<n>")
+        if not isinstance(v, str) or not 1 <= len(v.strip()) <= MAX_NAME:
+            raise ValueError(f"name of {k} must be a string of 1 to {MAX_NAME} chars")
+        out[k] = v.strip()
+    return out
 
 
 def _json(data):
@@ -165,11 +193,12 @@ def route(method, path, body, store, gpu, cfg, now):
     rest = parts[2:]
     if method == "GET" and not rest:
         return 200, {"files": list_files(store.list("files/"))}
-    shape = (method, len(rest), rest[1] if len(rest) > 1 else None)
-    if shape not in {("GET", 1, None), ("POST", 2, "transcribe"), ("GET", 3, "versions")}:
+    shape = (method, len(rest), rest[1] if len(rest) > 1 else None, rest[3] if len(rest) > 3 else None)
+    if shape not in {("GET", 1, None, None), ("POST", 2, "transcribe", None), ("GET", 2, "audio", None),
+                     ("GET", 3, "versions", None), ("PUT", 4, "versions", "names")}:
         return 404, error("not found", 404)
     fid = rest[0]
-    if not ID_RE.match(fid) or (len(rest) == 3 and not VERSION_RE.match(rest[2])):
+    if not ID_RE.match(fid) or (len(rest) >= 3 and not VERSION_RE.match(rest[2])):
         return 400, error("bad file id or version id")
     base = f"files/{fid}/"
     if not any(o["name"] == base + "audio" for o in store.list(base + "audio")):  # as GET /v1beta/files: no audio, no file
@@ -179,13 +208,34 @@ def route(method, path, body, store, gpu, cfg, now):
             meta = json.loads(store.read(base + "meta.json"))
         except KeyError:
             return 404, error("file not found", 404)
-        vs = [summary(json.loads(store.read(o["name"]))) for o in store.list(base + "versions/")]
+        vs = [summary(json.loads(store.read(o["name"]))) for o in store.list(base + "versions/")
+              if not o["name"].endswith(NAMES)]
         return 200, {"file": meta, "versions": sorted(vs, key=lambda v: v["id"], reverse=True)}
-    if len(rest) == 3:
+    if rest[1] == "audio":
         try:
-            return 200, json.loads(store.read(f"{base}versions/{rest[2]}.json"))
+            mime = json.loads(store.read(base + "meta.json"))["mime_type"]
+        except KeyError:
+            return 404, error("file not found", 404)
+        url = signed_get(cfg["bucket"], base + "audio", cfg["sa_email"], now(), cfg["sign"])
+        return 200, {"url": url, "mime_type": mime, "expires_in": EXPIRES}
+    if len(rest) >= 3:
+        vpath = f"{base}versions/{rest[2]}"
+        try:
+            version = json.loads(store.read(vpath + ".json"))
         except KeyError:
             return 404, error("version not found", 404)
+        if method == "GET":  # the stored version stays as it is; the names come from their own object
+            try:
+                version["names"] = json.loads(store.read(vpath + NAMES))
+            except KeyError:
+                version["names"] = {}
+            return 200, version
+        try:
+            names = check_names(body)
+        except ValueError as e:
+            return 400, error(str(e))
+        store.write(vpath + NAMES, json.dumps(names).encode(), "application/json", replace=True)
+        return 200, {"names": names}
     try:
         req, settings = gpu_request(f"gs://{cfg['bucket']}/{base}audio", body)
     except ValueError as e:
@@ -217,7 +267,8 @@ def _auth(extra=None):
 
 
 class GcsStore:
-    """GCS JSON API. write never replaces an object (ifGenerationMatch=0)."""
+    """GCS JSON API. write never replaces an object (ifGenerationMatch=0), unless replace=True (only *.names.json:
+    the IAM grant to replace is limited to these names, see upload.tf)."""
 
     def __init__(self, bucket):
         self.api = f"https://{HOST}/storage/v1/b/{bucket}/o"
@@ -243,12 +294,13 @@ class GcsStore:
                 raise KeyError(name) from e
             raise
 
-    def write(self, name, data, content_type, metadata=None):
+    def write(self, name, data, content_type, metadata=None, replace=False):
         b = "stt-files-boundary"
         head = json.dumps({"name": name, "contentType": content_type, "metadata": metadata or {}})
         body = (f"--{b}\r\nContent-Type: application/json\r\n\r\n{head}\r\n--{b}\r\n"
                 f"Content-Type: {content_type}\r\n\r\n").encode() + data + f"\r\n--{b}--\r\n".encode()
-        r = urllib.request.Request(f"{self.upload}?uploadType=multipart&ifGenerationMatch=0", body,
+        q = "uploadType=multipart" + ("" if replace else "&ifGenerationMatch=0")
+        r = urllib.request.Request(f"{self.upload}?{q}", body,
                                    _auth({"Content-Type": f"multipart/related; boundary={b}"}))
         urllib.request.urlopen(r, timeout=30).read()
 
@@ -313,6 +365,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.handle_call("POST")
+
+    def do_PUT(self):
+        self.handle_call("PUT")
 
 
 if __name__ == "__main__":

@@ -63,6 +63,14 @@ locals {
         post    = merge(local.files_backend["300"], { operationId = "transcribe", parameters = [local.p_id], responses = local.ok })
         options = merge(local.preflight, local.files_backend["30"], { operationId = "transcribeCors", parameters = [local.p_id] })
       }
+      "/v1beta/files/{id}/audio" = {
+        get     = merge(local.files_backend["30"], { operationId = "getAudio", parameters = [local.p_id], responses = local.ok })
+        options = merge(local.preflight, local.files_backend["30"], { operationId = "getAudioCors", parameters = [local.p_id] })
+      }
+      "/v1beta/files/{id}/versions/{version_id}/names" = {
+        put     = merge(local.files_backend["30"], { operationId = "putNames", parameters = [local.p_id, local.p_version], responses = local.ok })
+        options = merge(local.preflight, local.files_backend["30"], { operationId = "putNamesCors", parameters = [local.p_id, local.p_version] })
+      }
       "/v1beta/files/{id}/versions/{version_id}" = {
         get     = merge(local.files_backend["30"], { operationId = "getVersion", parameters = [local.p_id, local.p_version], responses = local.ok })
         options = merge(local.preflight, local.files_backend["30"], { operationId = "getVersionCors", parameters = [local.p_id, local.p_version] })

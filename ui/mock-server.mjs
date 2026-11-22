@@ -14,10 +14,20 @@ const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(200, cors); return res.end(); }
   if (req.method === "PUT" && req.url.startsWith("/mock-upload/")) { // the signed URL of /v1beta/uploads: no API key, like GCS
-    let n = 0; for await (const c of req) n += c.length;
-    const f = files.get(req.url.split("/")[2]); if (f) f.audio = true;
+    const chunks = []; for await (const c of req) chunks.push(c);
+    const n = chunks.reduce((s, c) => s + c.length, 0);
+    const f = files.get(req.url.split("/")[2]); if (f) f.audio = Buffer.concat(chunks);
     console.log(new Date().toISOString(), req.method, req.url, `${n} bytes`, req.headers["content-type"]);
     res.writeHead(200, cors); return res.end();
+  }
+  if (req.method === "GET" && req.url.startsWith("/mock-audio/")) { // the signed GET URL of /v1beta/files/<id>/audio: no API key, like GCS
+    const f = files.get(req.url.split("/")[2]);
+    if (!f?.audio) { res.writeHead(404, cors); return res.end(); }
+    const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? ""); // the <audio> element seeks with Range requests
+    const a = f.audio, from = r?.[1] ? +r[1] : 0, to = r?.[2] ? Math.min(+r[2], a.length - 1) : a.length - 1;
+    console.log(new Date().toISOString(), req.method, req.url, req.headers.range ?? "");
+    res.writeHead(r ? 206 : 200, { ...cors, "Content-Type": f.mime_type, "Accept-Ranges": "bytes", "Content-Length": to - from + 1, ...(r ? { "Content-Range": `bytes ${from}-${to}/${a.length}` } : {}) });
+    return res.end(a.subarray(from, to + 1));
   }
   if (req.headers["x-api-key"] !== "test") {
     console.log(new Date().toISOString(), req.method, req.url, "403 bad key");
@@ -60,13 +70,23 @@ http.createServer(async (req, res) => {
       headers: { "Content-Type": j.mime_type, "x-goog-content-length-range": `0,${j.size_bytes}` }, file_uri: `gs://mock-stt-audio/files/${id}/audio`, expires_in: 900 });
   }
   if (req.url === "/v1beta/interactions") return json(200, gemini(j)); // the direct route: nothing is saved
-  const m = req.url.match(/^\/v1beta\/files(?:\/([^/]+)(?:\/(transcribe|versions)(?:\/([^/]+))?)?)?$/);
-  if (m) { // STT-A files service: list, 1 file, 1 version, transcribe again (kept in memory)
-    const [, id, op, vid] = m, f = files.get(id);
+  const m = req.url.match(/^\/v1beta\/files(?:\/([^/]+)(?:\/(transcribe|versions|audio)(?:\/([^/]+)(\/names)?)?)?)?$/);
+  if (m) { // STT-A files service: list, 1 file, 1 version, names, audio URL, transcribe again (kept in memory)
+    const [, id, op, vid, names] = m, f = files.get(id);
     if (!id) return json(200, { files: [...files.values()].filter((x) => x.audio).reverse().map(({ audio, versions, ...x }) => ({ ...x, versions: versions.length, latest: versions.at(-1)?.id ?? null })) });
     if (!f || !f.audio) return json(404, { error: { code: 404, message: "file not found", status: "NOT_FOUND" } });
-    if (!op) { const { audio, versions, ...file } = f; return json(200, { file, versions: [...versions].reverse().map(({ response, ...v }) => ({ ...v, text_chars: response.output_text.length, speakers: 2 })) }); }
-    if (op === "versions") { const v = f.versions.find((x) => x.id === vid); return v ? json(200, v) : json(404, { error: { code: 404, message: "version not found", status: "NOT_FOUND" } }); }
+    if (!op) { const { audio, versions, ...file } = f; return json(200, { file, versions: [...versions].reverse().map(({ response, names, ...v }) => ({ ...v, text_chars: response.output_text.length, speakers: 2 })) }); }
+    if (op === "audio") return json(200, { url: `http://localhost:${process.env.MOCK_PORT ?? 5181}/mock-audio/${id}`, mime_type: f.mime_type, expires_in: 900 });
+    const ver = f.versions.find((x) => x.id === vid);
+    if (op === "versions" && !ver) return json(404, { error: { code: 404, message: "version not found", status: "NOT_FOUND" } });
+    if (op === "versions" && names && req.method === "PUT") { // the real service also checks: max 8 keys spk_<n>, names 1 to 40 chars
+      const bad = typeof j !== "object" || Array.isArray(j) || Object.keys(j).length > 8 || Object.entries(j).some(([k, x]) => !/^spk_\d{1,2}$/.test(k) || typeof x !== "string" || !x.trim() || x.trim().length > 40);
+      if (bad) return json(400, { error: { code: 400, message: "bad names", status: "INVALID_ARGUMENT" } });
+      ver.names = Object.fromEntries(Object.entries(j).map(([k, x]) => [k, x.trim()]));
+      return json(200, { names: ver.names });
+    }
+    if (op === "versions" && !names && req.method === "GET") { const { names: n = {}, ...rest } = ver; return json(200, { ...rest, names: n }); }
+    if (op !== "transcribe" || req.method !== "POST") return json(404, { error: { code: 404, message: "not found", status: "NOT_FOUND" } });
     const now = new Date(), stamp = now.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
     const v = { id: `${stamp}-${crypto.randomUUID().slice(0, 4)}`, file_id: id, created: now.toISOString().slice(0, 19) + "Z", label: j.label ?? "", image_tag: "mock",
       settings: { language_codes: j.language_codes ?? [], diarization: !!j.diarization }, run_seconds: 0.3,

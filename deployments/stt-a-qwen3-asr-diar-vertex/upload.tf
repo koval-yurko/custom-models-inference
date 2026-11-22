@@ -37,7 +37,7 @@ resource "google_cloud_run_v2_service_iam_member" "upload_gateway" {
   member   = "serviceAccount:${google_service_account.gateway.email}"
 }
 
-# Create and read only: the SA cannot replace or delete audio or versions.
+# Create and read: the SA cannot replace or delete audio or versions (names: see upload_names).
 resource "google_storage_bucket_iam_member" "upload_create" {
   bucket = local.audio_bucket
   role   = "roles/storage.objectCreator"
@@ -48,6 +48,19 @@ resource "google_storage_bucket_iam_member" "upload_read" {
   bucket = local.audio_bucket
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${module.upload.service_account_email}"
+}
+
+# Speaker names (files/<id>/versions/<version_id>.names.json) change, so the SA may replace these objects only.
+# The condition needs uniform bucket-level access (infra/core main.tf sets it).
+resource "google_storage_bucket_iam_member" "upload_names" {
+  bucket = local.audio_bucket
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${module.upload.service_account_email}"
+  condition {
+    title       = "speaker-names-only"
+    description = "Replace only the speaker names files"
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${local.audio_bucket}/objects/files/\") && resource.name.endsWith(\".names.json\")"
+  }
 }
 
 # The provider has no IAM resource for 1 Vertex AI endpoint, so the role is on the project (as the CORS proxy).

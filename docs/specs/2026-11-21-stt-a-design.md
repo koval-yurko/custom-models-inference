@@ -268,6 +268,7 @@ The bucket `<project_id>-stt-audio` (infra/core) holds everything under 1 prefix
 files/<id>/audio                           the audio, uploaded 1 time (signed PUT)
 files/<id>/meta.json                       {"id", "name", "mime_type", "size_bytes", "created"}
 files/<id>/versions/<version_id>.json      1 transcript run (shape below)
+files/<id>/versions/<version_id>.names.json  speaker names of that run, {"spk_1": "Alice"} (can change)
 ```
 
 - `<id>` is a new UUID4 from the server.
@@ -307,6 +308,8 @@ A small CPU service on Cloud Run. It gives upload URLs without a GPU cold start,
 | `GET /v1beta/files/{id}` | - | `{"file": <meta>, "versions": [<summary>]}`, newest first. A summary is the version JSON without `response`, plus `"text_chars"` and `"speakers"` (count). |
 | `GET /v1beta/files/{id}/versions/{version_id}` | - | The full version JSON. |
 | `POST /v1beta/files/{id}/transcribe` | `{"language_codes"?: [...], "diarization"?: true, "label"?: "..."}` | `201` with the full version JSON. |
+| `PUT /v1beta/files/{id}/versions/{version_id}/names` | `{"spk_1": "Alice"}`, at most 8 keys `spk_<n>`, names 1 to 40 chars | `{"names": {...}}`. It replaces `<version_id>.names.json`. The version JSON does not change. `GET` of the version adds `"names"`. Names are per version, because the `spk_N` labels can change between runs. |
+| `GET /v1beta/files/{id}/audio` | - | `{"url", "mime_type", "expires_in"}`: a V4 signed `GET` URL (15 minutes, signed header `host` only). The browser plays it in an `<audio>` element. No CORS rule is necessary for playback. |
 
 Upload answer:
 
@@ -356,7 +359,7 @@ On `transcribe`, the files service has its own timeout of 900 s and waits for th
 - `cors_proxy.tf`: copy LLM-A (target `:rawPredict`).
 - `gateway.tf`: gateway ID `stt-a-qwen3-asr-diar`. Every path has `options` with `security = []` for the browser preflight. Every operation that goes to the files service has its own `x-google-backend` with `path_translation = APPEND_PATH_TO_ADDRESS` (fact 8).
   - `/v1beta/interactions` (`post`): the top-level backend, the CORS proxy, deadline 300 s.
-  - `/v1beta/uploads` (`post`), `/v1beta/files` (`get`), `/v1beta/files/{id}` (`get`), `/v1beta/files/{id}/versions/{version_id}` (`get`): the files service, deadline 30 s.
+  - `/v1beta/uploads` (`post`), `/v1beta/files` (`get`), `/v1beta/files/{id}` (`get`), `/v1beta/files/{id}/versions/{version_id}` (`get`), `/v1beta/files/{id}/versions/{version_id}/names` (`put`), `/v1beta/files/{id}/audio` (`get`): the files service, deadline 30 s.
   - `/v1beta/files/{id}/transcribe` (`post`): the files service, deadline 300 s.
 - `outputs.tf`: LLM-B outputs, plus `upload_url` and `ui` with `type = "stt"`, `features = { cold_start = "vertex-429", max_mb = 20 }`.
 - `alerts.tf`: copy the LLM-B file (required: `scripts/check.py` fails without it). `title = "STT-A Qwen3 ASR + speakers"`, the Vertex AI endpoint filter, `ready_text = "models ready"`, default `down_text` (`Application shutdown complete.`, uvicorn). The module `vertex-model` already turns on container logs, which the alerts need. The files service gets no alerts: it runs on CPU and costs almost nothing.
@@ -391,7 +394,7 @@ The STT tab has 2 parts:
 
 - Every route needs the API key. Everyone with the key can list and read all files and transcripts. This is the "shared store" decision.
 - Forever retention plus 500 MB per upload: a holder of the key can fill the bucket without a limit. The budget alert is the only guard. Delete is a non-goal for now.
-- The files service can create and read objects in the audio bucket, and call Vertex AI. It cannot delete or overwrite: version names are new each time, and `objectCreator` cannot replace an object.
+- The files service can create and read objects in the audio bucket, and call Vertex AI. It cannot delete or overwrite audio or versions: version names are new each time, and `objectCreator` cannot replace an object. The only exception is `*.names.json`: a conditional `roles/storage.objectUser` grant (`upload_names` in `upload.tf`) lets it replace these objects only.
 - The GPU service can only read the audio bucket.
 - Path values `{id}` and `{version_id}` must match their exact format (UUID4, and the version pattern) before any GCS call, so a client cannot read other paths.
 

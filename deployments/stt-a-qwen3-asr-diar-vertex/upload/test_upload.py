@@ -35,8 +35,8 @@ class FakeStore:
             raise KeyError(name)
         return self.objects[name][0]
 
-    def write(self, name, data, content_type, metadata=None):
-        self.calls.append(("write", name))
+    def write(self, name, data, content_type, metadata=None, replace=False):
+        self.calls.append(("write", name, replace))
         self.put(name, data, metadata)
 
 
@@ -227,6 +227,56 @@ class UploadTest(unittest.TestCase):
                              ("POST", "/v1beta/files/../transcribe"), ("GET", f"/v1beta/files/{FID.upper()}")):
             self.assertEqual(call(method, path, None, store)[0], 400, path)
         self.assertEqual(store.calls, [])
+
+    def test_names_saved_per_version(self):
+        store = FakeStore()
+        stored_file(store, versions=(V1, V2))
+        raw = store.objects[f"files/{FID}/versions/{V1}.json"][0]
+        code, a = call("PUT", f"/v1beta/files/{FID}/versions/{V1}/names", {"spk_1": " Alice ", "spk_2": "Bob"}, store)
+        self.assertEqual((code, a), (200, {"names": {"spk_1": "Alice", "spk_2": "Bob"}}))
+        self.assertIn(("write", f"files/{FID}/versions/{V1}.names.json", True), store.calls)
+        self.assertEqual(store.objects[f"files/{FID}/versions/{V1}.json"][0], raw, "the version JSON must not change")
+        self.assertEqual(call("GET", f"/v1beta/files/{FID}/versions/{V1}", None, store)[1]["names"],
+                         {"spk_1": "Alice", "spk_2": "Bob"})
+        self.assertEqual(call("GET", f"/v1beta/files/{FID}/versions/{V2}", None, store)[1]["names"], {})
+        call("PUT", f"/v1beta/files/{FID}/versions/{V1}/names", {"spk_1": "Ann"}, store)  # replaces the whole map
+        self.assertEqual(call("GET", f"/v1beta/files/{FID}/versions/{V1}", None, store)[1]["names"], {"spk_1": "Ann"})
+        # the names object is not a version: not in the list count, not in the file versions
+        self.assertEqual(call("GET", "/v1beta/files", None, store)[1]["files"][0]["versions"], 2)
+        self.assertEqual([v["id"] for v in call("GET", f"/v1beta/files/{FID}", None, store)[1]["versions"]], [V2, V1])
+
+    def test_names_rejects(self):
+        store = FakeStore()
+        stored_file(store, versions=(V1,))
+        path = f"/v1beta/files/{FID}/versions/{V1}/names"
+        for body in ({f"spk_{i}": "x" for i in range(9)}, {"spk_1": "x" * 41}, {"spk_1": "  "}, {"spk_1": 5},
+                     {"alice": "x"}, {"spk_1/../x": "x"}, ["spk_1"], None):
+            self.assertEqual(call("PUT", path, body, store)[0], 400, body)
+        self.assertEqual(call("PUT", path, {f"spk_{i}": "x" * 40 for i in range(8)}, store)[0], 200)
+        self.assertEqual(call("PUT", f"/v1beta/files/{FID}/versions/{V2}/names", {"spk_1": "A"}, store)[0], 404)
+        self.assertEqual(call("PUT", f"/v1beta/files/{FID}/versions/x/names", {}, store)[0], 400)
+        self.assertEqual(call("PUT", f"/v1beta/files/{FID}/versions/{V1}", {}, store)[0], 404)
+        self.assertFalse([n for n in store.objects if n.endswith(f"{V2}.names.json")])
+
+    def test_audio_url(self):
+        store = FakeStore()
+        stored_file(store)
+        code, a = call("GET", f"/v1beta/files/{FID}/audio", None, store)
+        self.assertEqual(code, 200)
+        self.assertEqual((a["mime_type"], a["expires_in"]), ("audio/mpeg", 900))
+        self.assertTrue(a["url"].startswith(f"https://storage.googleapis.com/B/files/{FID}/audio?"), a["url"])
+        self.assertIn("X-Goog-SignedHeaders=host&", a["url"])
+        self.assertEqual(call("GET", f"/v1beta/files/{FID2}/audio", None, store)[0], 404)
+        self.assertEqual(call("GET", "/v1beta/files/x/audio", None, FakeStore())[0], 400)
+
+    def test_signed_get_canonical(self):
+        seen = []
+        orig = upload.hashlib.sha256
+        with mock.patch.object(upload.hashlib, "sha256", lambda b: seen.append(b) or orig(b)):
+            upload.signed_get("B", "files/n/audio", "sa@p", NOW, lambda b: b"x")
+        lines = seen[0].decode().split("\n")
+        self.assertEqual(lines[0], "GET")
+        self.assertEqual(lines[3:], ["host:storage.googleapis.com", "", "host", "UNSIGNED-PAYLOAD"])
 
     def test_unknown_route(self):
         self.assertEqual(call("GET", "/v1beta/nope")[0], 404)

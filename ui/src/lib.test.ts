@@ -3,7 +3,7 @@ import { call } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
 import { parseHash, parseModels } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
-import { clock, gatewayTimedOut, groupTurns, speakerCount } from "./panels/Stt";
+import { clock, gatewayTimedOut, groupTurns, namesBody, speakerCount, speakerName } from "./panels/Stt";
 import { voiceIds } from "./panels/Tts";
 import { parseSse, readSse } from "./sse";
 
@@ -151,5 +151,16 @@ describe("clock", () => {
     expect(clock("0.031s")).toBe("00:00:00");
     expect(clock("125.5s")).toBe("00:02:05");
     expect(clock("3725s")).toBe("01:02:05");
+  });
+});
+
+describe("speaker names", () => {
+  it("shows the given name, else the label, else text", () => {
+    expect(speakerName({ spk_1: "Alice" }, "spk_1")).toBe("Alice");
+    expect(speakerName({ spk_1: "Alice" }, "spk_2")).toBe("spk_2");
+    expect(speakerName(undefined, "")).toBe("text");
+  });
+  it("trims the draft and drops empty names", () => {
+    expect(namesBody({ spk_1: " Alice ", spk_2: "  " })).toEqual({ spk_1: "Alice" });
   });
 });

@@ -42,6 +42,10 @@ run "upload_service" {
     error_message = "the files SA must list and read the audio bucket"
   }
   assert {
+    condition     = google_storage_bucket_iam_member.upload_names.role == "roles/storage.objectUser" && google_storage_bucket_iam_member.upload_names.condition[0].expression == "resource.name.startsWith(\"projects/_/buckets/p-stt-audio/objects/files/\") && resource.name.endsWith(\".names.json\")"
+    error_message = "the files SA may replace only the speaker names files (*.names.json)"
+  }
+  assert {
     condition     = google_project_iam_member.upload_predict.role == "roles/aiplatform.user" && google_project_iam_member.upload_predict.member == "serviceAccount:${module.upload.service_account_email}"
     error_message = "the files SA must call Vertex AI :rawPredict"
   }
