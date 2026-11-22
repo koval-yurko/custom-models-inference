@@ -104,6 +104,8 @@ Delete a stored file by hand (there is no delete route): `gcloud storage rm -r g
 
 Verified on 2026-11-21 (image 0.1.2): through the gateway, `transcribe` on a stored 2-speaker file returned HTTP 201 with the exact text, 37 `word_info` items, and the turns `spk_1`, `spk_2`, `spk_1` in the right places. The version was saved, and the live test UI showed it, made a second version with a label, and showed both side by side. `models ready` is in the Vertex AI logs. The 3 models fit on the L4 with `GPU_MEMORY_UTILIZATION=0.5` and `MAX_MODEL_LEN=16384`. The aligner words have no punctuation (`output_text` keeps it).
 
+Verified on 2026-11-22 (image 0.1.3): `transcribe` on the same stored `two.wav` through the gateway returned HTTP 201 after a scale-up from 0. The version `20261122T134028Z-4b20` (label `0.1.3 check`, `image_tag` 0.1.3) has the same `output_text` as the 0.1.2 version, 37 `word_info` items and the turns `spk_1` 0.03-4.91 s, `spk_2` 5.04-8.96 s, `spk_1` 9.06-12.58 s. GPU run 8.4 s (first request after the start).
+
 Checks only a real deploy can do (write the results here):
 
 1. The 3 models fit on the 24 GB L4 (vLLM `gpu_memory_utilization=0.5`). If the load fails with CUDA out of memory, lower it in `app/models.py`.
@@ -119,7 +121,7 @@ Checks only a real deploy can do (write the results here):
 | 2026-11-21 | 0.1.2 | First deploy (`vertex.py deploy`: model upload, node start, image pull, weights copy, model load) | 24 min (17:23 to 17:47 UTC) | Node and image pull about 18 min (first container log 17:41). Weights copy (6.5 GB to `/tmp/models`) and the load of the 3 models about 4 min: `models ready` at 17:45:01. vLLM: KV cache 3.5 GiB, `torch.compile` 41 s. |
 | 2026-11-21 | 0.1.3 | Deploy, attempt 1 (`vertex.py deploy`) | Failed after 28.5 min (22:41:31 to 23:10:05 UTC) | Node and image pull 24 min (first container log 23:05:27). The container was healthy: weights copy 67 s, `models ready` at 23:08:57, `/health` 200. Then the operation failed with code 13 "System error. Please try this operation again" and Vertex AI stopped the container. Slack got "scaled to 0" from that stop. No cause in the logs. |
 | 2026-11-21 | 0.1.3 | Deploy, attempt 2 (same command, the uploaded model is reused) | 12 min (23:10:38 to 23:22:43 UTC) | First container log after 6.4 min (the node probably had the image). Weights copy 63 s, `models ready` 3 min 42 s after the container start. |
-| - | 0.1.3 | Scale up from 0 | - | Measure on the next call at 0 replicas. |
+| 2026-11-22 | 0.1.3 | Scale up from 0 (first `transcribe` call to HTTP 201) | 7 min 19 s (13:33:18 to 13:40:37 UTC) | Container start after 3 min 14 s, weights copy 69 s, `models ready` at 13:40:12 (6 min 54 s). A try on 2026-11-21 reached `models ready` in 7 min 3 s, but the next call got no answer (the connection closed after 75 s, no log in the files service). A new gateway config went live a few minutes before. |
 
 Weights copy (from the container start to the first vLLM log line): 89 s with 0.1.2 (1 file at a time), 63 to 67 s with 0.1.3 (`transfer_manager`, 16 threads). The gain is about 25 s. The node start and the image pull take most of the cold start, and the weights copy does not change them. The 0.1.3 log shows `Connection pool is full ... Connection pool size: 10`: 16 threads share 10 connections.
 
