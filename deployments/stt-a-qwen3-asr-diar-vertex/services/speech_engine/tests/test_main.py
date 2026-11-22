@@ -12,8 +12,8 @@ from unittest import mock
 import numpy as np
 from fastapi.testclient import TestClient
 
-from app import main
-from app.logic import Word
+from speech_engine import main, pipeline
+from speech_engine.logic import Word
 
 SR = 16000
 B64 = base64.b64encode(b"audio").decode()
@@ -51,7 +51,7 @@ class FakeModels:
 
 @contextlib.contextmanager
 def ready_client(models):
-    with mock.patch.object(main, "decode", return_value=(np.zeros(10 * SR, np.float32), SR)):
+    with mock.patch.object(pipeline, "decode", return_value=(np.zeros(10 * SR, np.float32), SR)):
         with TestClient(main.create_app(lambda: models, "B")) as c:
             for _ in range(100):
                 if c.get("/health").status_code == 200:
@@ -92,6 +92,13 @@ class MainTest(unittest.TestCase):
         self.assertEqual(r.json()["output_text"], "Hello there.\nHi.")
         self.assertEqual({w["speaker"] for w in words(r)}, {"spk_1", "spk_2"})
         self.assertEqual(words(r)[2]["start_offset"], "5.000s")  # aligner time + turn start
+        self.assertEqual(r.json()["audio_seconds"], 10.0)
+
+    def test_answer_has_setup(self):
+        setup = {"asr": "A", "aligner": "B", "diarization": "C", "image_tag": "9"}
+        with mock.patch.object(main, "SETUP", setup), ready_client(FakeModels()) as c:
+            r = c.post("/v1beta/interactions", json=body())
+        self.assertEqual(r.json()["setup"], setup)
 
     def test_language_detected_once(self):
         m = FakeModels()
@@ -169,13 +176,13 @@ class MainTest(unittest.TestCase):
         with wave.open(buf, "wb") as w:
             w.setnchannels(2), w.setsampwidth(2), w.setframerate(8000)
             w.writeframes(struct.pack("<2h", 1000, 1000) * 8000)
-        audio, sr = main.decode(buf.getvalue())
+        audio, sr = pipeline.decode(buf.getvalue())
         self.assertEqual(sr, 16000)
         self.assertAlmostEqual(len(audio) / sr, 1.0, delta=0.01)
-        audio, sr = main.decode(buf.getvalue(), max_seconds=0.5)  # -t stops the decode early
+        audio, sr = pipeline.decode(buf.getvalue(), max_seconds=0.5)  # -t stops the decode early
         self.assertAlmostEqual(len(audio) / sr, 0.5, delta=0.01)
-        with self.assertRaises(main.BadRequest):
-            main.decode(b"not audio")
+        with self.assertRaises(pipeline.BadRequest):
+            pipeline.decode(b"not audio")
 
 
 if __name__ == "__main__":

@@ -62,3 +62,6 @@ button.link.selected { font-weight: 700; text-decoration: underline; }
 .speakers label { font-weight: 600; }
 .speakers input { width: 120px; font-weight: normal; }
 @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
+.reference textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .85rem; }
+.reference summary { cursor: pointer; margin: 8px 0; }
+.setups { margin-bottom: 8px; }

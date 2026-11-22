@@ -522,7 +522,7 @@ Each filter is `<resource_filter> AND (textPayload:"<text>" OR jsonPayload.messa
 | `tts-a-kokoro-cpu` | `STARTUP HTTP probe succeeded` (Cloud Run system log) | Uvicorn logs `Application startup complete.` before the probe passes |
 | `llm-a-gemma4-12b-vllm-vertex` | `Application startup complete.` | vLLM loads the model before it starts uvicorn |
 | `llm-b-qwen35-9b-fastapi` | `engine ready` | `image/app.py` prints it after the engine loads. Uvicorn starts first |
-| `stt-a-qwen3-asr-diar-vertex` | `models ready` | `image/app/main.py` prints it after the 3 models load. Uvicorn starts first |
+| `stt-a-qwen3-asr-diar-vertex` | `models ready` | `services/speech_engine/speech_engine/main.py` prints it after the 3 models load. Uvicorn starts first |
 
 `scripts/vertex.py` uses the Vertex AI v1beta1 API. There, container logs are off by default, and `disableContainerLogging = false` has no effect. The `vertex-model` module sets `enableContainerLogging = true`. A model deployed before 2026-11-20 has no container logs: deploy it again once.
 
@@ -563,7 +563,7 @@ cd infra/modules/scale-alerts && terraform init -backend=false && terraform test
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 cd deployments/llm-b-qwen35-9b-fastapi && terraform init -backend=false && terraform test       # custom container upload spec
-cd deployments/stt-a-qwen3-asr-diar-vertex && terraform init -backend=false && terraform test   # STT-A: rawPredict, gateway paths, files service
+cd deployments/stt-a-qwen3-asr-diar-vertex && terraform init -backend=false && terraform test   # STT-A: rawPredict, gateway paths, STT API service
 ```
 
 The test UI has its own unit tests: `cd ui && npm install && npm test`.

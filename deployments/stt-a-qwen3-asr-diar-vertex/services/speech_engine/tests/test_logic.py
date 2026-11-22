@@ -1,7 +1,7 @@
 import base64
 import unittest
 
-from app.logic import (
+from speech_engine.logic import (
     ALIGNER_LANGS, LANGS, BadRequest, Job, Turn, Word, build_response, check_duration,
     error_body, estimate_words, fmt_offset, label_speakers, longest_clip, make_turns, parse_request,
 )

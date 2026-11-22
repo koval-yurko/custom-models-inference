@@ -12,10 +12,10 @@ RUN pip install --no-cache-dir --ignore-installed blinker \
     && pip freeze | grep -iE '^(torch|torchaudio|torchvision|vllm)==' > /tmp/base.txt \
     && pip install --no-cache-dir -c /tmp/base.txt -r requirements.txt
 
-COPY app/ app/
+COPY speech_engine/ speech_engine/
 # The weights come from GCS (AIP_STORAGE_URI), never from the Hugging Face Hub.
 ENV HF_HUB_OFFLINE=1
 
-# 1 process: each process loads the 3 models again. app.main reads AIP_HTTP_PORT (Vertex AI sets 8080).
+# 1 process: each process loads the 3 models again. speech_engine.main reads AIP_HTTP_PORT (Vertex AI sets 8080).
 # This replaces the vLLM server entrypoint of the base image.
-ENTRYPOINT ["python3", "-m", "app.main"]
+ENTRYPOINT ["python3", "-m", "speech_engine.main"]

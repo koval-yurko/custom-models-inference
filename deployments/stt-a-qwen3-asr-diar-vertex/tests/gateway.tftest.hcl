@@ -17,14 +17,14 @@ run "gateway_requires_api_key" {
     error_message = "only the OPTIONS (CORS preflight) operations may override the global security"
   }
   assert {
-    condition     = join(",", sort(keys(local.openapi.paths))) == "/v1beta/files,/v1beta/files/{id},/v1beta/files/{id}/audio,/v1beta/files/{id}/transcribe,/v1beta/files/{id}/versions/{version_id},/v1beta/files/{id}/versions/{version_id}/names,/v1beta/interactions,/v1beta/uploads"
+    condition     = join(",", sort(keys(local.openapi.paths))) == "/v1beta/files,/v1beta/files/{id},/v1beta/files/{id}/audio,/v1beta/files/{id}/reference,/v1beta/files/{id}/transcribe,/v1beta/files/{id}/versions/{version_id},/v1beta/files/{id}/versions/{version_id}/names,/v1beta/files/{id}/versions/{version_id}/score,/v1beta/interactions,/v1beta/scores,/v1beta/uploads"
     error_message = "the gateway must expose only the interactions, uploads and files paths (/health stays private)"
   }
   assert {
     condition = alltrue(flatten([for path, ops in local.openapi.paths : [
-      for op in values(ops) : op["x-google-backend"].address == module.upload.url && op["x-google-backend"].path_translation == "APPEND_PATH_TO_ADDRESS"
+      for op in values(ops) : op["x-google-backend"].address == module.stt_api.url && op["x-google-backend"].path_translation == "APPEND_PATH_TO_ADDRESS"
     ] if path != "/v1beta/interactions"]))
-    error_message = "every operation of the files service paths must carry its own backend (API Gateway ignores it on a path)"
+    error_message = "every operation of the STT API service paths must carry its own backend (API Gateway ignores it on a path)"
   }
   assert {
     condition = (
@@ -34,19 +34,22 @@ run "gateway_requires_api_key" {
       && local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"].get["x-google-backend"].deadline == 30
       && local.openapi.paths["/v1beta/files/{id}/audio"].get["x-google-backend"].deadline == 30
       && local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/names"].put["x-google-backend"].deadline == 30
+      && local.openapi.paths["/v1beta/files/{id}/reference"].put["x-google-backend"].deadline == 30
+      && local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/score"].get["x-google-backend"].deadline == 30
+      && local.openapi.paths["/v1beta/scores"].get["x-google-backend"].deadline == 300
     )
-    error_message = "transcribe waits up to 300 s, the other files routes 30 s"
+    error_message = "transcribe and scores wait up to 300 s, the other files routes 30 s"
   }
   assert {
     condition = alltrue([
-      for op in concat(values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"]), values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/names"])) :
+      for op in concat(values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}"]), values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/names"]), values(local.openapi.paths["/v1beta/files/{id}/versions/{version_id}/score"])) :
       toset([for p in op.parameters : "${p.name}:${p["in"]}:${p.required}:${p.type}"]) == toset(["id:path:true:string", "version_id:path:true:string"])
     ])
     error_message = "the path parameters id and version_id must be declared on each operation"
   }
   assert {
     condition = alltrue([
-      for path in ["/v1beta/files/{id}", "/v1beta/files/{id}/transcribe", "/v1beta/files/{id}/audio"] : alltrue([
+      for path in ["/v1beta/files/{id}", "/v1beta/files/{id}/transcribe", "/v1beta/files/{id}/audio", "/v1beta/files/{id}/reference"] : alltrue([
         for op in values(local.openapi.paths[path]) : [for p in op.parameters : p.name] == ["id"]
       ])
     ])
@@ -63,11 +66,11 @@ run "gateway_requires_api_key" {
   # API Gateway reads x-google-backend at the top level or the operation level, not at the path level.
   assert {
     condition = alltrue([for op in ["post", "options"] : (
-      local.openapi.paths["/v1beta/uploads"][op]["x-google-backend"].address == module.upload.url
+      local.openapi.paths["/v1beta/uploads"][op]["x-google-backend"].address == module.stt_api.url
       && local.openapi.paths["/v1beta/uploads"][op]["x-google-backend"].path_translation == "APPEND_PATH_TO_ADDRESS"
       && local.openapi.paths["/v1beta/uploads"][op]["x-google-backend"].deadline == 30
     )])
-    error_message = "both operations of /v1beta/uploads must go to the upload service with a 30 s deadline"
+    error_message = "both operations of /v1beta/uploads must go to the STT API service with a 30 s deadline"
   }
   assert {
     condition     = !contains(keys(local.openapi.paths["/v1beta/uploads"]), "x-google-backend")

@@ -9,7 +9,7 @@ import numpy as np
 from google.cloud import storage
 from google.cloud.storage import transfer_manager
 
-from app.logic import Word
+from speech_engine.logic import Word
 
 # /models is read-only in the Vertex AI container, so the weights go to the writable local disk.
 ROOT = Path("/tmp/models")

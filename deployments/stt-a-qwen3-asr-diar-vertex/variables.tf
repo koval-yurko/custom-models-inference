@@ -12,7 +12,13 @@ variable "region" {
 variable "image_tag" {
   description = "Tag of the image that image/cloudbuild.yaml pushed to the models repo. Change it for each new build."
   type        = string
-  default     = "0.1.3"
+  default     = "0.1.4"
+}
+
+variable "stt_api_image_tag" {
+  description = "Tag of the STT API service image that services/stt_api/cloudbuild.yaml pushed to the models repo. Change it for each new build."
+  type        = string
+  default     = "0.2.0"
 }
 
 variable "gateway_region" {

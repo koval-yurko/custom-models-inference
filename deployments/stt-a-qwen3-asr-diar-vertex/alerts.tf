@@ -11,7 +11,7 @@ module "scale_alerts" {
   project_id      = var.project_id
   title           = "STT-A Qwen3 ASR + speakers"
   resource_filter = "resource.type=\"aiplatform.googleapis.com/Endpoint\" AND resource.labels.endpoint_id=\"${module.model.endpoint_id}\""
-  # Printed by app/main.py after the 3 models load (uvicorn starts before the models).
+  # Printed by speech_engine/main.py after the 3 models load (uvicorn starts before the models).
   ready_text           = "models ready"
   notification_channel = data.google_monitoring_notification_channel.slack.name
 }

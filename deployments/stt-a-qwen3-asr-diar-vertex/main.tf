@@ -25,11 +25,11 @@ provider "google-beta" {
 }
 
 locals {
-  # 3 weights-copy runs fill this folder: asr/, aligner/ and pyannote/ (see README.md). app/models.py copies it to /models.
+  # 3 weights-copy runs fill this folder: asr/, aligner/ and pyannote/ (see README.md). speech_engine/models.py copies it to /models.
   model_dir = "stt-a-qwen3-asr-diar"
   # Own image, built by image/cloudbuild.yaml into the infra/core models repo.
   image = "${var.region}-docker.pkg.dev/${var.project_id}/models/stt-a-qwen3-asr-diar:${var.image_tag}"
-  # Made by infra/core (main.tf). Large audio goes there through the upload service (upload.tf).
+  # Made by infra/core (main.tf). Large audio goes there through the STT API service (stt_api.tf).
   audio_bucket = "${var.project_id}-stt-audio"
 }
 
@@ -40,13 +40,19 @@ module "model" {
   region     = var.region
   name       = "stt-a-qwen3-asr-diar"
   image      = local.image
-  # No args: app/main.py reads AIP_STORAGE_URI and AIP_HTTP_PORT itself.
+  # No args: speech_engine/main.py reads AIP_STORAGE_URI and AIP_HTTP_PORT itself.
   env = {
     HF_HUB_OFFLINE = "1"
     AUDIO_BUCKET   = local.audio_bucket
-    # vLLM (Qwen3-ASR) shares the L4 with the aligner and Pyannote. app/models.py reads these.
+    # vLLM (Qwen3-ASR) shares the L4 with the aligner and Pyannote. speech_engine/models.py reads these.
     GPU_MEMORY_UTILIZATION = "0.5"
     MAX_MODEL_LEN          = "16384"
+    # The setup record of each answer (speech_engine/main.py SETUP): change it with the models or their settings, so the
+    # evaluation can compare setups. The model names match the weights-copy HF_REPO values in README.md.
+    SETUP_ASR         = "Qwen3-ASR-1.7B"
+    SETUP_ALIGNER     = "Qwen3-ForcedAligner-0.6B"
+    SETUP_DIARIZATION = "pyannote/speaker-diarization-community-1"
+    SETUP_IMAGE_TAG   = var.image_tag
   }
 
   health_route  = "/health"

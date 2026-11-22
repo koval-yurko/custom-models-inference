@@ -19,7 +19,7 @@ run "alerts_watch_own_model" {
   }
   assert {
     condition     = strcontains(module.scale_alerts.filters.ready, "models ready")
-    error_message = "ready must be the line models ready (app/main.py prints it after the 3 models load)"
+    error_message = "ready must be the line models ready (speech_engine/main.py prints it after the 3 models load)"
   }
   assert {
     condition     = strcontains(module.scale_alerts.filters.down, "Application shutdown complete.")

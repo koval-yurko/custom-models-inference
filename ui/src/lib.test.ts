@@ -3,7 +3,7 @@ import { call } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
 import { parseHash, parseModels } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
-import { clock, gatewayTimedOut, groupTurns, namesBody, speakerCount, speakerName } from "./panels/Stt";
+import { clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, namesBody, parseReference, refTime, speakerCount, speakerName } from "./panels/Stt";
 import { voiceIds } from "./panels/Tts";
 import { parseSse, readSse } from "./sse";
 
@@ -162,5 +162,35 @@ describe("speaker names", () => {
   });
   it("trims the draft and drops empty names", () => {
     expect(namesBody({ spk_1: " Alice ", spk_2: "  " })).toEqual({ spk_1: "Alice" });
+  });
+});
+
+describe("reference text", () => {
+  it("reads 'Name: text' lines, with optional times, and skips empty lines", () => {
+    expect(parseReference("[00:00:00.0 - 00:00:04.9] Alice: Hello: there.\n\n Bob:  Hi. \n", "en")).toEqual({
+      language: "en",
+      turns: [
+        { speaker: "Alice", text: "Hello: there.", start: "00:00:00.0", end: "00:00:04.9" },
+        { speaker: "Bob", text: "Hi." },
+      ],
+    });
+  });
+  it("takes JSON as it is and names the bad line", () => {
+    expect(parseReference('{"language":"de","turns":[{"speaker":"A","text":"x"}]}', "en")).toEqual({ language: "de", turns: [{ speaker: "A", text: "x" }] });
+    expect(() => parseReference("Alice: ok\nno speaker here", "")).toThrow("Line 2");
+  });
+  it("formats back to the same lines", () => {
+    const text = "[00:00:00.0 - 00:00:04.9] Alice: Hello.\nBob: Hi.";
+    expect(formatReference(parseReference(text, ""))).toBe(text);
+  });
+  it("writes times as hh:mm:ss.s", () => {
+    expect([refTime(0), refTime(8.958), refTime(69), refTime(3725.04)]).toEqual(["00:00:00.0", "00:00:09.0", "00:01:09.0", "01:02:05.0"]);
+  });
+  it("drafts a reference from a version with the given names", () => {
+    const w = (text: string, speaker: string | undefined, start: string, end: string) => ({ type: "word_info", text, speaker, start_offset: start, end_offset: end });
+    const draft = draftFromVersion([w("Hello", "spk_1", "0.100s", "0.300s"), w("there.", "spk_1", "0.400s", "4.900s"), w("Hi.", "spk_2", "5.040s", "6.000s")], "", { spk_1: "Alice" });
+    expect(draft).toBe("[00:00:00.1 - 00:00:04.9] Alice: Hello there.\n[00:00:05.0 - 00:00:06.0] spk_2: Hi.");
+    expect(parseReference(draft, "").turns).toHaveLength(2);
+    expect(draftFromVersion([], "Hello\nthere.", undefined)).toBe("Speaker: Hello there.");
   });
 });

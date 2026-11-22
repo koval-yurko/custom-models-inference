@@ -23,9 +23,9 @@ output "gateway_url" {
   value       = "https://${google_api_gateway_gateway.this.default_hostname}"
 }
 
-output "upload_url" {
-  description = "Upload service URL (private). The gateway path /v1beta/uploads calls it."
-  value       = module.upload.url
+output "stt_api_url" {
+  description = "STT API service URL (private). The gateway paths /v1beta/uploads, /v1beta/files... and /v1beta/scores call it."
+  value       = module.stt_api.url
 }
 
 # The test UI reads this output (scripts/ui-deploy.py -> models.json). Schema: .claude/skills/model-ui/SKILL.md.

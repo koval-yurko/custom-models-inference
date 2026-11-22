@@ -6,6 +6,8 @@ import { parseHash, type ModelConfig } from "../config";
 // STT-A with stored files and transcript history (spec: docs/specs/2026-11-21-stt-a-design.md).
 // Every file goes through POST /v1beta/uploads (signed PUT). Each run of POST /v1beta/files/<id>/transcribe is saved
 // as a version by the files service. 2 ticked versions show side by side.
+// Evaluation: a reference (the correct transcript with speakers) per file. The files service scores each version against
+// it (WER, cpWER, DER) and sums the scores per setup (GET /v1beta/scores).
 
 export interface WordInfo {
   type: string;
@@ -14,8 +16,13 @@ export interface WordInfo {
   start_offset: string;
   end_offset: string;
 }
-interface FileRow { id: string; name: string; mime_type: string; size_bytes: number; created: string; versions: number; latest: string | null }
-interface Summary { id: string; created: string; label: string; image_tag: string; run_seconds: number; settings: { language_codes: string[]; diarization: boolean }; text_chars: number; speakers: number }
+interface FileRow { id: string; name: string; mime_type: string; size_bytes: number; created: string; versions: number; latest: string | null; reference?: boolean }
+export interface Setup { asr: string; aligner: string; diarization: string; image_tag: string }
+interface Summary { id: string; created: string; label: string; image_tag: string; run_seconds: number; settings: { language_codes: string[]; diarization: boolean }; setup?: Setup | null; text_chars: number; speakers: number }
+export interface RefTurn { speaker: string; text: string; start?: string | number; end?: string | number }
+export interface Reference { language: string; turns: RefTurn[] }
+interface Score { setup: string; wer: number; cpwer: number; der: { der: number; missed: number; false_alarm: number; confusion: number } | null; mapping: Record<string, string>; ref_speakers: number; hyp_speakers: number; speed: number | null }
+interface SetupRow { setup: string; versions: number; files: number; wer: number | null; cpwer: number | null; der: number | null }
 type Names = Record<string, string>; // per version: {"spk_1": "Alice"} (PUT .../versions/<id>/names)
 interface Version extends Omit<Summary, "text_chars" | "speakers"> { names?: Names; response: { output_text?: string; steps?: { content?: { annotations?: WordInfo[] }[] }[] } }
 
@@ -52,6 +59,42 @@ export const speakerName = (names: Names | undefined, speaker: string) => names?
 
 /** Draft names -> the PUT body: trimmed, empty names left out (the label shows again). */
 export const namesBody = (draft: Names): Names => Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+
+/** Seconds -> "00:01:02.5", the time format of a reference. */
+export function refTime(sec: number): string {
+  const t = Math.round(sec * 10) / 10;
+  return `${String(Math.floor(t / 3600)).padStart(2, "0")}:${String(Math.floor(t / 60) % 60).padStart(2, "0")}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+}
+
+/** Reference editor text -> PUT body. JSON as it is, or 1 turn per line: "[00:00:00.0 - 00:00:04.9] Alice: Hello" (times optional). */
+export function parseReference(text: string, language: string): Reference {
+  if (text.trim().startsWith("{")) return JSON.parse(text);
+  const turns = text.split("\n").flatMap((line, i) => {
+    if (!line.trim()) return [];
+    const m = /^\s*(?:\[\s*(\S+)\s+-\s+(\S+)\s*\]\s*)?([^:]{1,40}):\s*(.*)$/.exec(line);
+    if (!m) throw new Error(`Line ${i + 1}: write "Name: text" or "[00:00:00.0 - 00:00:04.9] Name: text"`);
+    return [{ speaker: m[3].trim(), text: m[4].trim(), ...(m[1] ? { start: m[1], end: m[2] } : {}) }];
+  });
+  return { language, turns };
+}
+
+/** Reference -> editor text (the line form of parseReference). */
+export const formatReference = (r: Reference) =>
+  r.turns.map((t) => `${t.start !== undefined ? `[${t.start} - ${t.end}] ` : ""}${t.speaker}: ${t.text}`).join("\n");
+
+/** A version as a reference draft: its turns with times and the given speaker names. The user corrects the text and the
+ * speakers, then saves it as the reference. So a reviewed transcript becomes test data. */
+export function draftFromVersion(annotations: WordInfo[], outputText: string, names: Names | undefined): string {
+  if (!annotations.length) return outputText ? `Speaker: ${outputText.replace(/\s+/g, " ").trim()}` : "";
+  return groupTurns(annotations)
+    .map((g) => `[${refTime(parseFloat(g.start))} - ${refTime(parseFloat(g.end))}] ${g.speaker ? speakerName(names, g.speaker) : "Speaker"}: ${g.text}`)
+    .join("\n");
+}
+
+const pct = (x: number | null | undefined) => (x == null ? "-" : `${(x * 100).toFixed(1)} %`);
+const setupShort = (s: Setup | null | undefined) => (s ? `${s.asr} + ${s.diarization.split("/").pop()} @ ${s.image_tag}` : "unknown");
+/** cpWER mapping -> names for PUT .../names (only spk_<n> labels). */
+const mappingNames = (m: Record<string, string>): Names => Object.fromEntries(Object.entries(m).filter(([k]) => /^spk_\d{1,2}$/.test(k)));
 
 export const speakerCount = (annotations: WordInfo[]) => new Set(annotations.map((w) => w.speaker).filter(Boolean)).size;
 
@@ -110,6 +153,28 @@ function Transcript({ v, playing, onPlay, onNames }: TranscriptProps) {
   );
 }
 
+function ScoreCells({ s, onNames }: { s?: Score; onNames: (n: Names) => void }) {
+  if (!s) return <td colSpan={5} className="muted">…</td>;
+  const map = Object.entries(s.mapping);
+  const der = s.der && `missed ${pct(s.der.missed)}, false alarm ${pct(s.der.false_alarm)}, confusion ${pct(s.der.confusion)}`;
+  return (
+    <>
+      <td><b>{pct(s.cpwer)}</b></td>
+      <td>{pct(s.wer)}</td>
+      <td title={der || "the reference has no times"}>{pct(s.der?.der)}</td>
+      <td>{s.speed ? `${s.speed}x` : "-"}</td>
+      <td>
+        {map.map(([k, v]) => `${k || "no speaker"} → ${v}`).join(", ") || "-"}{" "}
+        {Object.keys(mappingNames(s.mapping)).length > 0 && (
+          <button className="link" title="Save the mapped reference names as the speaker names of this version" onClick={() => onNames(mappingNames(s.mapping))}>
+            use as names
+          </button>
+        )}
+      </td>
+    </>
+  );
+}
+
 export default function Stt({ model }: { model: ModelConfig }) {
   const [files, setFiles] = useState<FileRow[]>([]);
   const [fileId, setFileId] = useState<string | undefined>(() => (parseHash(location.hash).tab === model.id ? parseHash(location.hash).file : undefined));
@@ -124,6 +189,11 @@ export default function Stt({ model }: { model: ModelConfig }) {
   const [retry, setRetry] = useState<number>();
   const [error, setError] = useState<string>();
   const [curl, setCurl] = useState("");
+  const [refText, setRefText] = useState("");
+  const [refLang, setRefLang] = useState("");
+  const [hasRef, setHasRef] = useState(false);
+  const [scores, setScores] = useState<Record<string, Score>>({});
+  const [setups, setSetups] = useState<SetupRow[]>([]);
   const abort = useRef<AbortController>(null);
   // 1 <audio> for all turns. The signed GET URL lasts 15 minutes, so it is fetched again after 10 minutes.
   const audio = useRef<HTMLAudioElement>(null);
@@ -139,18 +209,37 @@ export default function Stt({ model }: { model: ModelConfig }) {
     return res.json();
   };
   const loadFiles = () => get<{ files: FileRow[] }>("/v1beta/files").then((d) => setFiles(d.files), (e) => setError(String(e)));
+  const loadSetups = () => get<{ setups: SetupRow[] }>("/v1beta/scores").then((d) => setSetups(d.setups), (e) => setError(`Scores: ${e}`));
+  const loadScores = (id: string, versions: Summary[]) =>
+    Promise.all(versions.map((v) => get<Score>(`/v1beta/files/${id}/versions/${v.id}/score`).then((s) => [v.id, s] as const))).then(
+      (list) => current.current === id && setScores(Object.fromEntries(list)),
+      (e) => setError(`Scores: ${e}`),
+    );
+  const loadReference = async (id: string) => {
+    const res = await call(model, `/v1beta/files/${id}/reference`, { method: "GET" });
+    if (current.current !== id) return false;
+    if (res.status === 404) return (setHasRef(false), setRefText(""), setRefLang(""), false);
+    if (!res.ok) return (setError(`Reference: ${await errorText(res)}`), false);
+    const r: Reference = await res.json();
+    setHasRef(true);
+    setRefText(formatReference(r));
+    setRefLang(r.language);
+    return true;
+  };
   const loadDetail = (id: string) =>
     get<{ file: FileRow; versions: Summary[] }>(`/v1beta/files/${id}`).then(
       (d) => {
         if (current.current !== id) return;
         setDetail(d);
         setTicked((old) => (old.length ? old : d.versions.slice(0, 1).map((v) => v.id)));
+        void loadReference(id).then((has) => has && loadScores(id, d.versions));
       },
       (e) => setError(String(e)),
     );
 
   useEffect(() => {
     void loadFiles();
+    void loadSetups();
     const onHash = () => {
       const h = parseHash(location.hash);
       if (h.tab !== model.id) return;
@@ -166,6 +255,9 @@ export default function Stt({ model }: { model: ModelConfig }) {
     audio.current?.pause();
     setDetail(undefined);
     setTicked([]);
+    setScores({});
+    setHasRef(false);
+    setRefText("");
     if (fileId) void loadDetail(fileId);
   }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -212,6 +304,30 @@ export default function Stt({ model }: { model: ModelConfig }) {
     setFull((f) => (f[version] ? { ...f, [version]: { ...f[version], names: d.names } } : f));
   };
 
+  const saveReference = async () => {
+    if (!fileId) return;
+    let body: Reference;
+    try {
+      body = parseReference(refText, refLang);
+    } catch (e) {
+      return setError(`Reference: ${e instanceof Error ? e.message : e}`);
+    }
+    const res = await call(model, `/v1beta/files/${fileId}/reference`, { method: "PUT", headers: JSON_HDR, body: JSON.stringify(body) });
+    if (!res.ok) return setError(`Reference: ${await errorText(res)}`);
+    setError(undefined);
+    void loadFiles();
+    void loadDetail(fileId);
+    void loadSetups();
+  };
+  const draftReference = () => {
+    const v = ticked.map((id) => full[id]).find(Boolean);
+    if (!v) return setError("Tick a version first: its turns become the draft.");
+    if (refText.trim() && !confirm("Replace the text in the editor with the ticked version?")) return;
+    setRefText(draftFromVersion(words(v), v.response.output_text ?? "", v.names));
+    setRefLang(v.settings.language_codes[0] ?? refLang);
+  };
+  const readRefFile = (f: File) => void f.text().then(setRefText);
+
   const open = (id: string) => (location.hash = `#/${model.id}/${id}`);
   const tick = (id: string) => setTicked((old) => (old.includes(id) ? old.filter((x) => x !== id) : [...old, id].slice(-2)));
 
@@ -249,6 +365,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
       const id = await work(signal, timing);
       timing.totalMs = performance.now() - t0;
       void loadFiles();
+      void loadSetups();
       const target = id ?? current.current;
       if (target) void loadDetail(target);
     } catch (e) {
@@ -288,8 +405,26 @@ export default function Stt({ model }: { model: ModelConfig }) {
         </label>
         <div className="row">
           <b>Files</b>
-          <button onClick={() => void (loadFiles(), fileId && loadDetail(fileId))}>Refresh</button>
+          <button onClick={() => void (setError(undefined), loadFiles(), loadSetups(), fileId && loadDetail(fileId))}>Refresh</button>
         </div>
+        {setups.length > 0 && (
+          <>
+            <b>Accuracy per setup</b>
+            <p className="muted">Mean over the versions of files with a reference. Lower is better.</p>
+            <table className="versions setups">
+              <thead>
+                <tr><th>Setup</th><th>Files</th><th>Versions</th><th title="text and speakers">cpWER</th><th title="text only">WER</th><th title="speaker time, 0.25 s collar">DER</th></tr>
+              </thead>
+              <tbody>
+                {setups.map((r) => (
+                  <tr key={r.setup}>
+                    <td>{r.setup}</td><td>{r.files}</td><td>{r.versions}</td><td><b>{pct(r.cpwer)}</b></td><td>{pct(r.wer)}</td><td>{pct(r.der)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
         <ul className="files">
           {files.length === 0 && <li className="muted">No files yet.</li>}
           {files.map((f) => (
@@ -298,7 +433,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
                 {f.name}
               </button>{" "}
               <span className="muted">
-                {f.versions} version{f.versions === 1 ? "" : "s"} · {(f.size_bytes / 1e6).toFixed(1)} MB · {when(f.created)}
+                {f.versions} version{f.versions === 1 ? "" : "s"}{f.reference ? " · reference" : ""} · {(f.size_bytes / 1e6).toFixed(1)} MB · {when(f.created)}
               </span>
             </li>
           ))}
@@ -336,23 +471,51 @@ export default function Stt({ model }: { model: ModelConfig }) {
             </div>
             <table className="versions">
               <thead>
-                <tr><th>Show</th><th>Time</th><th>Image</th><th>Lang</th><th>Spk</th><th>Label</th><th>Run</th></tr>
+                <tr>
+                  <th>Show</th><th>Time</th><th>Setup</th><th>Lang</th><th>Spk</th><th>Label</th><th>Run</th>
+                  {hasRef && (<><th title="text and speakers">cpWER</th><th title="text only">WER</th><th title="speaker time, 0.25 s collar">DER</th><th title="audio seconds per run second">Speed</th><th>Mapping</th></>)}
+                </tr>
               </thead>
               <tbody>
                 {detail.versions.map((v) => (
                   <tr key={v.id}>
                     <td><input type="checkbox" aria-label={`Show ${vtime(v.id)}`} checked={ticked.includes(v.id)} onChange={() => tick(v.id)} /></td>
                     <td>{vtime(v.id)}</td>
-                    <td>{v.image_tag}</td>
+                    <td title={v.setup ? JSON.stringify(v.setup) : "a version made before the setup record"}>{setupShort(v.setup)}</td>
                     <td>{v.settings.language_codes.join(",") || "auto"}</td>
-                    <td>{v.speakers}</td>
+                    <td>{scores[v.id] ? `${v.speakers} of ${scores[v.id].ref_speakers}` : v.speakers}</td>
                     <td>{v.label || "-"}</td>
                     <td>{v.run_seconds} s</td>
+                    {hasRef && <ScoreCells s={scores[v.id]} onNames={(n) => void saveNames(v.id, n)} />}
                   </tr>
                 ))}
               </tbody>
             </table>
             {detail.versions.length === 0 && <p className="muted">No versions yet. Press "Transcribe again".</p>}
+            <details className="reference">
+              <summary>
+                <b>Reference</b> <span className="muted">{hasRef ? "(saved: the versions get scores)" : "(none: add the correct transcript to score the versions)"}</span>
+              </summary>
+              <p className="muted">
+                1 turn per line: <code>[00:00:00.0 - 00:00:04.9] Alice: Hello.</code> The times are optional (without them, no DER). JSON is also accepted. Or tick a version, press "Draft from version",
+                then correct the text and the speakers.
+              </p>
+              <textarea aria-label="Reference" rows={8} value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="Alice: Hello, this is the first speaker." />
+              <div className="row">
+                <label>
+                  Language
+                  <input value={refLang} maxLength={20} placeholder="en" onChange={(e) => setRefLang(e.target.value)} />
+                </label>
+                <button onClick={draftReference}>Draft from version</button>
+                <label>
+                  Load a file
+                  <input type="file" accept=".json,.txt,text/plain,application/json" onChange={(e) => e.target.files?.[0] && readRefFile(e.target.files[0])} />
+                </label>
+                <button className="primary" disabled={!refText.trim()} onClick={() => void saveReference()}>
+                  Save reference
+                </button>
+              </div>
+            </details>
           </>
         ) : (
           <p className="muted">{fileId ? "Loading the file…" : "Upload a file or pick one from the list."}</p>

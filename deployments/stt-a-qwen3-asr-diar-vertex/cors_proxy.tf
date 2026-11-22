@@ -1,7 +1,7 @@
 # Private Cloud Run proxy that adds CORS headers to every answer of Vertex AI (see infra/modules/cors-proxy).
 # The target is :rawPredict: 1 fixed URL, the predict_route of main.tf (/v1beta/interactions).
 locals {
-  # The 1 route of the GPU service. The CORS proxy and the files service (upload.tf) both call it.
+  # The 1 route of the GPU service. The CORS proxy and the STT API service (stt_api.tf) both call it.
   raw_predict_url = "https://${module.model.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${module.model.endpoint_id}:rawPredict"
 }
 

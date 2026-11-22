@@ -2,7 +2,7 @@
 # so a request without a valid key never starts a replica.
 # /v1beta/interactions: the gateway calls the CORS proxy (cors_proxy.tf) with a Google ID token of the gateway SA.
 # The proxy calls Vertex AI :rawPredict with an access token and adds the CORS headers that Vertex AI does not send.
-# /v1beta/uploads and /v1beta/files...: the gateway calls the files service (upload.tf). It answers OPTIONS and adds
+# /v1beta/uploads and /v1beta/files...: the gateway calls the STT API service (stt_api.tf). It answers OPTIONS and adds
 # CORS headers itself.
 # No streaming: the app answers in one JSON body.
 
@@ -14,16 +14,16 @@ locals {
   # options: the browser CORS preflight of the test UI. It has no API key, so it has security = [].
   preflight = { security = [], responses = { "200" = { description = "CORS preflight" } } }
 
-  # The files service (upload.tf). API Gateway reads x-google-backend at the top level or the operation level only,
+  # The STT API service (stt_api.tf). API Gateway reads x-google-backend at the top level or the operation level only,
   # so each operation of a files path carries it. transcribe waits for the GPU, the other routes answer at once.
   files_backend = {
     for d in [30, 300] : tostring(d) => {
-      x-google-backend = { address = module.upload.url, path_translation = "APPEND_PATH_TO_ADDRESS", deadline = d }
+      x-google-backend = { address = module.stt_api.url, path_translation = "APPEND_PATH_TO_ADDRESS", deadline = d }
     }
   }
   p_id      = { name = "id", in = "path", required = true, type = "string" }
   p_version = { name = "version_id", in = "path", required = true, type = "string" }
-  ok        = { "200" = { description = "JSON answer of the files service" } }
+  ok        = { "200" = { description = "JSON answer of the STT API service" } }
 
   # OpenAPI 2.0. Only the listed paths are open. Every path needs the API key. /health stays private.
   openapi = {
@@ -71,6 +71,20 @@ locals {
         put     = merge(local.files_backend["30"], { operationId = "putNames", parameters = [local.p_id, local.p_version], responses = local.ok })
         options = merge(local.preflight, local.files_backend["30"], { operationId = "putNamesCors", parameters = [local.p_id, local.p_version] })
       }
+      "/v1beta/files/{id}/reference" = {
+        get     = merge(local.files_backend["30"], { operationId = "getReference", parameters = [local.p_id], responses = local.ok })
+        put     = merge(local.files_backend["30"], { operationId = "putReference", parameters = [local.p_id], responses = local.ok })
+        options = merge(local.preflight, local.files_backend["30"], { operationId = "referenceCors", parameters = [local.p_id] })
+      }
+      "/v1beta/files/{id}/versions/{version_id}/score" = {
+        get     = merge(local.files_backend["30"], { operationId = "getScore", parameters = [local.p_id, local.p_version], responses = local.ok })
+        options = merge(local.preflight, local.files_backend["30"], { operationId = "getScoreCors", parameters = [local.p_id, local.p_version] })
+      }
+      # Reads every version of every file with a reference, so it gets the long deadline.
+      "/v1beta/scores" = {
+        get     = merge(local.files_backend["300"], { operationId = "listScores", responses = local.ok })
+        options = merge(local.preflight, local.files_backend["30"], { operationId = "listScoresCors" })
+      }
       "/v1beta/files/{id}/versions/{version_id}" = {
         get     = merge(local.files_backend["30"], { operationId = "getVersion", parameters = [local.p_id, local.p_version], responses = local.ok })
         options = merge(local.preflight, local.files_backend["30"], { operationId = "getVersionCors", parameters = [local.p_id, local.p_version] })
@@ -117,5 +131,5 @@ resource "google_api_gateway_gateway" "this" {
   gateway_id = local.gateway_id
   api_config = google_api_gateway_api_config.this.id
 
-  depends_on = [module.cors_proxy, module.upload]
+  depends_on = [module.cors_proxy, module.stt_api]
 }

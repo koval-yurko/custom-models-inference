@@ -21,7 +21,7 @@ locals {
     "cloudquotas.googleapis.com",
     # Slack notification channel and the scale alerts of the deployments.
     "monitoring.googleapis.com",
-    # signBlob for the signed upload URLs of STT-A (deployments/stt-a-qwen3-asr-diar-vertex/upload)
+    # signBlob for the signed upload URLs of STT-A (deployments/stt-a-qwen3-asr-diar-vertex/services/stt_api)
     "iamcredentials.googleapis.com",
   ]
 }
@@ -51,7 +51,7 @@ resource "google_storage_bucket" "models" {
   depends_on = [google_project_service.apis]
 }
 
-# STT-A audio files and transcript versions (files/<id>/...). The files service gives signed PUT URLs.
+# STT-A audio files and transcript versions (files/<id>/...). The STT API service gives signed PUT URLs.
 resource "google_storage_bucket" "stt_audio" {
   project                     = var.project_id
   name                        = "${var.project_id}-stt-audio"

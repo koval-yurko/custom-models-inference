@@ -116,7 +116,7 @@ A database (Firestore) was left out: the user asked for the bucket, and it is 1 
 8. API Gateway reads `x-google-backend` at the top level or on each operation, not on a path.
 9. Not confirmed: Cloud Run keeps a request running after the gateway closes its connection (no official page says so). See "Long files and the 300 s gateway deadline".
 10. A dedicated Vertex AI endpoint has a default request timeout of 10 minutes. Only `clientConnectionConfig.inferenceTimeout` at endpoint creation raises it. The `google` provider (`~> 8.10`) has no such field on `google_vertex_ai_endpoint`, so this deployment keeps 600 s. A GPU run longer than 600 s fails on every route.
-11. Cloud Run documents no size limit for 1 container argument (1000 arguments at most; 1 env value at most 32 KB). The files service passes `upload.py` as 1 argument, so the file stays under 32 KB. If it grows past that, build a small image for it.
+11. Cloud Run documents no size limit for 1 container argument (1000 arguments at most; 1 env value at most 32 KB). The STT API service first passed `upload.py` as 1 argument. Since 2026-11-22 it has its own image, so this limit no longer applies.
 
 Not checked (the plan must have a step for each): the full Gemini response JSON, the offset format `"0.100s"`, GPU memory use of the 3 models together.
 
@@ -128,7 +128,7 @@ Not checked (the plan must have a step for each): the full Gemini response JSON,
 sequenceDiagram
   participant C as UI or script
   participant GW as API Gateway
-  participant F as Files service (CPU)
+  participant F as STT API service (CPU)
   participant V as GPU service (Vertex AI)
   participant B as Bucket stt-audio
   C->>GW: POST /v1beta/uploads (name, type, size)
@@ -239,11 +239,12 @@ Response (HTTP 200):
 - `annotations`: present when `diarization_mode == "speaker"` or `"word"` is in `timestamp_granularities`. Offsets are strings in seconds with 3 decimals and the suffix `s`.
 - `steps[].type` and `content[].type` copy the general Interactions shape. Check them against a real Gemini answer before release.
 
-### Container (`deployments/stt-a-qwen3-asr-diar-vertex/image/`)
+### Container (`deployments/stt-a-qwen3-asr-diar-vertex/services/speech_engine/`)
 
 - `Dockerfile`: `FROM vllm/vllm-openai:v0.14.0`. LLM-B uses v0.33.0, but `qwen-asr` 0.0.6 pins vLLM 0.14.0 (fact 4). Install `qwen-asr`, `pyannote.audio` 4.x, `soundfile`, `google-cloud-storage`. Also `ffmpeg` to decode mp3, m4a, ogg and webm.
-- `app/logic.py`: pure functions, no model imports (turns, language map, word times, labels, response, request check). Unit tests run without a GPU.
-- `app/main.py`: FastAPI, same start pattern as LLM-B. Uvicorn opens the port at once (the Vertex AI liveness probe is TCP). The models load in a thread: copy the 3 model folders from `AIP_STORAGE_URI` to `/models` on local disk, then load the 3 models. `/health` returns 503 until all 3 are loaded, then 200. After that, the app prints the log line `models ready` (the Slack "ready" signal). Listen on `0.0.0.0:$AIP_HTTP_PORT` (8080). 1 Uvicorn worker. 1 request at a time (an `asyncio.Lock`). vLLM `gpu_memory_utilization=0.5` leaves room for the aligner and Pyannote on the 24 GB L4.
+- `speech_engine/logic.py`: pure functions, no model imports (turns, language map, word times, labels, response, request check). Unit tests run without a GPU.
+- `speech_engine/pipeline.py` (split out on 2026-11-22): the transcription work (decode, diarize, transcribe each turn, word times). `speech_engine/main.py` keeps only the HTTP server.
+- `speech_engine/main.py`: FastAPI, same start pattern as LLM-B. Uvicorn opens the port at once (the Vertex AI liveness probe is TCP). The models load in a thread: copy the 3 model folders from `AIP_STORAGE_URI` to `/models` on local disk, then load the 3 models. `/health` returns 503 until all 3 are loaded, then 200. After that, the app prints the log line `models ready` (the Slack "ready" signal). Listen on `0.0.0.0:$AIP_HTTP_PORT` (8080). 1 Uvicorn worker. 1 request at a time (an `asyncio.Lock`). vLLM `gpu_memory_utilization=0.5` leaves room for the aligner and Pyannote on the 24 GB L4.
 - `cloudbuild.yaml`: copy the LLM-B file. Build and push to `<region>-docker.pkg.dev/<project_id>/models/stt-a-qwen3-asr-diar:${_TAG}`. `_TAG` must match `var.image_tag`.
 - Env: `HF_HUB_OFFLINE=1`, `AUDIO_BUCKET`.
 - The GPU service accepts `file_uri` only from `gs://<audio_bucket>/`. It needs no change for the history: the object names `files/<id>/audio` are under that bucket.
@@ -291,14 +292,14 @@ files/<id>/versions/<version_id>.names.json  speaker names of that run, {"spk_1"
 }
 ```
 
-- `image_tag` comes from the env value `IMAGE_TAG` of the files service. Terraform sets it from `var.image_tag`, the same value as the GPU image. It is the tag in Terraform, not a value that the GPU reports. If the user builds a new image but does not apply, the tag can be wrong. This is a known limit.
+- `image_tag` comes from the env value `IMAGE_TAG` of the STT API service. Terraform sets it from `var.image_tag`, the same value as the GPU image. It is the tag in Terraform, not a value that the GPU reports. If the user builds a new image but does not apply, the tag can be wrong. This is a known limit.
 - `label` is optional free text from the user, 200 chars at most (my call: it makes a test run easy to find).
 
-### Files service (`deployments/stt-a-qwen3-asr-diar-vertex/upload/`)
+### STT API service (`deployments/stt-a-qwen3-asr-diar-vertex/services/stt_api/`)
 
 A small CPU service on Cloud Run. It gives upload URLs without a GPU cold start, keeps the file list and the history, and calls the GPU service for "transcribe again".
 
-- Runtime: `python:3.13.9-slim` through the `dockerhub` proxy, code passed as `python3 -c <file>`, as the CORS proxy does. Standard library only. It signs through `signBlob` with a metadata server token, and reads and writes GCS through the JSON API.
+- Runtime: own image `stt-a-qwen3-asr-diar-api` (`FROM python:3.13.9-slim`, package `stt_api`, `python3 -m stt_api`), built by `services/stt_api/cloudbuild.yaml`. Until 2026-11-22 it was 1 file passed as `python3 -c <file>`; the evaluation code made a package with modules worth an image. Standard library only. It signs through `signBlob` with a metadata server token, and reads and writes GCS through the JSON API.
 - All answers carry the CORS headers. The service answers `OPTIONS` itself, because the gateway sends it the browser preflight. Errors use the error shape of the GPU service.
 
 | Route | Body | Answer |
@@ -344,25 +345,25 @@ Listing uses the GCS JSON API (list with `prefix=files/`, read with `alt=media`)
 
 The gateway stops waiting after 300 s (HTTP 504 to the client). On the direct route, the GPU replica then finishes the work for nothing (risk accepted on 2026-11-19).
 
-On `transcribe`, the files service has its own timeout of 900 s and waits for the GPU service up to its 600 s limit (fact 10). It saves the version before it answers, so its request is still open in Cloud Run. Not confirmed: if Cloud Run keeps a request running after the gateway closes its connection. If it does, a long file still gets its version, and the UI finds it with a refresh. If it does not, a long file gives a 504 and no version. The README gets a check step for this on the first real deploy.
+On `transcribe`, the STT API service has its own timeout of 900 s and waits for the GPU service up to its 600 s limit (fact 10). It saves the version before it answers, so its request is still open in Cloud Run. Not confirmed: if Cloud Run keeps a request running after the gateway closes its connection. If it does, a long file still gets its version, and the UI finds it with a refresh. If it does not, a long file gives a 504 and no version. The README gets a check step for this on the first real deploy.
 
 ### Terraform
 
 - `infra/core/main.tf`: the bucket `<project_id>-stt-audio` (no lifecycle rule, `force_destroy = false`, the CORS rule for `PUT`), output `stt_audio_bucket`, the API `iamcredentials.googleapis.com` (for `signBlob`). `infra/core/gateways.tf`: the API ID `stt-a-qwen3-asr-diar` in `local.gateway_apis`.
 - `variables.tf`: `project_id`, `region`, `gateway_region` and `image_tag`, as LLM-B.
 - `main.tf`: module `vertex-model` with the custom image `local.image` (built from `var.image_tag`), `health_route = "/health"`, `predict_route = "/v1beta/interactions"`, `machine_type = "g2-standard-12"`, `accelerator_type = "NVIDIA_L4"`, `accelerator_count = 1`, `shared_memory_size_mb = 16384`, `deployment_timeout = "1800s"`, `max_replica_count = 1`, `weights_dir = "stt-a-qwen3-asr-diar"`. The GPU service account gets `roles/storage.objectViewer` on the audio bucket, and no write access.
-- `upload.tf`: the files service, built with the module `model-service` in the same way as the CORS proxy: CPU only, min 0, private, invoked only by the gateway service account.
-  - Service name `stt-a-qwen3-asr-diar-files`.
+- `stt_api.tf`: the STT API service, built with the module `model-service` in the same way as the CORS proxy: CPU only, min 0, private, invoked only by the gateway service account.
+  - Service name `stt-a-qwen3-asr-diar-api`.
   - `timeout = "900s"` (the GPU call stops at 600 s, fact 10).
   - Env `AUDIO_BUCKET`, `SA_EMAIL`, `IMAGE_TAG`, and `TARGET` (the `:rawPredict` URL, the same value as the CORS proxy target).
   - IAM: `roles/storage.objectCreator` and `roles/storage.objectViewer` on the audio bucket, `roles/iam.serviceAccountTokenCreator` on its own service account, `roles/aiplatform.user` on the project (as the CORS proxy has).
 - `cors_proxy.tf`: copy LLM-A (target `:rawPredict`).
-- `gateway.tf`: gateway ID `stt-a-qwen3-asr-diar`. Every path has `options` with `security = []` for the browser preflight. Every operation that goes to the files service has its own `x-google-backend` with `path_translation = APPEND_PATH_TO_ADDRESS` (fact 8).
+- `gateway.tf`: gateway ID `stt-a-qwen3-asr-diar`. Every path has `options` with `security = []` for the browser preflight. Every operation that goes to the STT API service has its own `x-google-backend` with `path_translation = APPEND_PATH_TO_ADDRESS` (fact 8).
   - `/v1beta/interactions` (`post`): the top-level backend, the CORS proxy, deadline 300 s.
-  - `/v1beta/uploads` (`post`), `/v1beta/files` (`get`), `/v1beta/files/{id}` (`get`), `/v1beta/files/{id}/versions/{version_id}` (`get`), `/v1beta/files/{id}/versions/{version_id}/names` (`put`), `/v1beta/files/{id}/audio` (`get`): the files service, deadline 30 s.
-  - `/v1beta/files/{id}/transcribe` (`post`): the files service, deadline 300 s.
+  - `/v1beta/uploads` (`post`), `/v1beta/files` (`get`), `/v1beta/files/{id}` (`get`), `/v1beta/files/{id}/versions/{version_id}` (`get`), `/v1beta/files/{id}/versions/{version_id}/names` (`put`), `/v1beta/files/{id}/audio` (`get`): the STT API service, deadline 30 s.
+  - `/v1beta/files/{id}/transcribe` (`post`): the STT API service, deadline 300 s.
 - `outputs.tf`: LLM-B outputs, plus `upload_url` and `ui` with `type = "stt"`, `features = { cold_start = "vertex-429", max_mb = 20 }`.
-- `alerts.tf`: copy the LLM-B file (required: `scripts/check.py` fails without it). `title = "STT-A Qwen3 ASR + speakers"`, the Vertex AI endpoint filter, `ready_text = "models ready"`, default `down_text` (`Application shutdown complete.`, uvicorn). The module `vertex-model` already turns on container logs, which the alerts need. The files service gets no alerts: it runs on CPU and costs almost nothing.
+- `alerts.tf`: copy the LLM-B file (required: `scripts/check.py` fails without it). `title = "STT-A Qwen3 ASR + speakers"`, the Vertex AI endpoint filter, `ready_text = "models ready"`, default `down_text` (`Application shutdown complete.`, uvicorn). The module `vertex-model` already turns on container logs, which the alerts need. The STT API service gets no alerts: it runs on CPU and costs almost nothing.
 - No streaming, so no `scripts/gateway-streaming.py` step.
 
 ### Test UI (`ui/src/panels/Stt.tsx`)
@@ -394,9 +395,20 @@ The STT tab has 2 parts:
 
 - Every route needs the API key. Everyone with the key can list and read all files and transcripts. This is the "shared store" decision.
 - Forever retention plus 500 MB per upload: a holder of the key can fill the bucket without a limit. The budget alert is the only guard. Delete is a non-goal for now.
-- The files service can create and read objects in the audio bucket, and call Vertex AI. It cannot delete or overwrite audio or versions: version names are new each time, and `objectCreator` cannot replace an object. The only exception is `*.names.json`: a conditional `roles/storage.objectUser` grant (`upload_names` in `upload.tf`) lets it replace these objects only.
+- The STT API service can create and read objects in the audio bucket, and call Vertex AI. It cannot delete or overwrite audio or versions: version names are new each time, and `objectCreator` cannot replace an object. The only exception is `*.names.json`: a conditional `roles/storage.objectUser` grant (`upload_names` in `stt_api.tf`) lets it replace these objects only.
 - The GPU service can only read the audio bucket.
 - Path values `{id}` and `{version_id}` must match their exact format (UUID4, and the version pattern) before any GCS call, so a client cannot read other paths.
+
+### Evaluation (added 2026-11-22)
+
+User decisions (2026-11-21): the test audio is the user's own stored files, and a file is evaluated only when the user saved its reference. No public data sets. The goal is to compare model setups (models and their settings), not only models.
+
+- Reference: `files/<id>/reference.json`, `{"language", "turns": [{"speaker", "text", "start"?, "end"?}]}`. Times are seconds or `hh:mm:ss.s`. The STT API service may replace it (IAM condition in `stt_api.tf`, as `*.names.json`). The UI makes a draft from a version, so a corrected model answer becomes the reference (user feedback becomes test data).
+- Setup record: the GPU service adds `setup` and `audio_seconds` to each answer. The STT API service saves `setup` at the top of the version.
+- Code: `services/stt_api/stt_api/evaluation/` (`reference.py`, `metrics.py`, `scoring.py`), apart from the main upload and transcribe flow.
+- Scores are computed on read, not stored: a metric change applies to all old versions. Word edit distance is bit-parallel (Myers/Hyyro) on Python ints, so a 30-minute file scores in about 0.1 s. The speaker mapping uses the Hungarian method for cpWER (fewest word errors) and for DER (most overlap time).
+- Hypothesis segments for DER: consecutive words of 1 speaker, split at a gap over 1 s.
+- `GET /v1beta/scores` groups by the setup plus the request settings that change the result (no diarization, a fixed language) and gives the mean of each score over the versions.
 
 ## Size limits
 
@@ -408,7 +420,7 @@ The STT tab has 2 parts:
 
 - The Slack "ready" line is `models ready`, printed after all 3 models load (same idea as `engine ready` in LLM-B). Check it in the real logs after the first cold start.
 - The signed URL is valid 15 minutes.
-- The files service is a separate CPU service in the same deployment folder, not a route in the GPU container.
+- The STT API service is a separate CPU service in the same deployment folder, not a route in the GPU container.
 - `output_text` joins the turn texts with a new line, without speaker names.
 - `force_destroy = false` on the audio bucket.
 - An optional label on each version, 200 chars at most.
@@ -433,7 +445,7 @@ The STT tab has 2 parts:
 
 1. A request with a short 2-speaker audio file returns `word_info` items with 2 speakers through the gateway.
 2. A file larger than 20 MB works through `/v1beta/uploads`.
-3. Unit tests of the files service cover all 5 routes with a fake GCS and a fake GPU, including: 429 and 500 from the GPU save nothing; a bad `{id}` gives 400 before any GCS call; a file without audio is not listed.
+3. Unit tests of the STT API service cover all 5 routes with a fake GCS and a fake GPU, including: 429 and 500 from the GPU save nothing; a bad `{id}` gives 400 before any GCS call; a file without audio is not listed.
 4. `./scripts/check.py` passes, including the gateway paths (operation-level backend) and the IAM.
 5. The UI works against the mock: upload, first version, transcribe again with a label, 2 versions side by side, a link with the file id opens it. Proof with the `verify-ui` skill.
 6. The Slack messages "ready" and "scaled to 0" arrive. The real-time factor and the cold start are written down in the README. The endpoint scales to 0.
