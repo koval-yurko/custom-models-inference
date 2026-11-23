@@ -4,6 +4,7 @@
 Run from anywhere:  ./scripts/hcp-sync.py [--dry-run]   (it loads the repo .env itself; no direnv needed)
 Needs: TF_CLOUD_ORGANIZATION, TF_CLOUD_PROJECT, TF_TOKEN_app_terraform_io, GOOGLE_APPLICATION_CREDENTIALS.
 Creates the workspaces if missing, sets remote execution, and upserts the variables. Never prints values.
+Every workspace also gets RUNPOD_API_KEY as a sensitive env var (the runpod provider fails without a key).
 """
 import json, os, pathlib, sys, urllib.request, urllib.error
 
@@ -40,7 +41,7 @@ COMMON = {"project_id": E("GCP_PROJECT_ID"), "region": E("GCP_REGION")}
 WORKSPACES = {
     # infra/core. The workspace keeps its old name, so the state stays.
     "custom-models-bootstrap": ("infra/core", {**COMMON, "billing_account": E("BILLING_ACCOUNT"), "budget_amount": E("BUDGET_AMOUNT"),
-                                      "hf_token": E("HF_TOKEN"),
+                                      "hf_token": E("HF_TOKEN"), "runpod_api_key": E("RUNPOD_API_KEY"),
                                       "slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
@@ -48,7 +49,9 @@ WORKSPACES = {
     "custom-models-llm-b-qwen35-9b-fastapi": ("deployments/llm-b-qwen35-9b-fastapi", COMMON),
     "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar-vertex", COMMON),
 }
-SENSITIVE = {"hf_token", "slack_bot_token", "GOOGLE_CREDENTIALS"}
+# Env vars for every workspace: the GPU platform providers read their key from it (they fail without one).
+PROVIDER_KEYS = {"RUNPOD_API_KEY": E("RUNPOD_API_KEY")}
+SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
 
 
 def api(method, path, body=None):
@@ -114,6 +117,9 @@ def main():
             for v in api("GET", f"/workspaces/{ws}/vars")["data"]:
                 existing[(v["attributes"]["category"], v["attributes"]["key"])] = v["id"]
         upsert(ws, existing, "GOOGLE_CREDENTIALS", creds, "env")
+        for k, v in PROVIDER_KEYS.items():
+            if v:
+                upsert(ws, existing, k, v, "env")
         for k, v in tfvars.items():
             if v:
                 upsert(ws, existing, k, v, "terraform")

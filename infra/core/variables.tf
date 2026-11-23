@@ -48,3 +48,10 @@ variable "slack_channel" {
     error_message = "slack_channel must start with #, for example #models."
   }
 }
+
+variable "runpod_api_key" {
+  description = "Runpod API key. Ephemeral: it goes to Secret Manager (runpod-api-key) and never into state. The CORS proxy of each model reads it."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}

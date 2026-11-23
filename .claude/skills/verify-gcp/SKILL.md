@@ -62,6 +62,7 @@ Real calls with the shared API key. The key comes from `terraform output -raw ap
 
 - `--tts`: `GET /v1/audio/voices` must be `200`, and one short `POST /v1/audio/speech` (`wav`) must return a file that starts with `RIFF`.
 - `--llm`: one chat call (`max_tokens` 32). At 0 replicas, Vertex AI answers `429`: the script retries every 30 s, at most 60 times (the same rule as the UI). It must end with `200` and a non-empty answer. After the check, the replica stays up for about 15 minutes. Check scale to zero later with the `cloud-run-instances` skill (Cloud Run) or the Vertex AI console (see the deployment README).
+- `--llm` calls the `base_url` of the tab, which is the default platform. For a model with several platforms (`platforms` in `models.json`), call each other platform path by hand: the Test loop of the deployment README with `$GW/<platform>/v1/chat/completions` (for example `/runpod/`). A Runpod call starts a GPU worker, billed per second until the idle time (300 s) ends. Say so first. At 0 workers the CORS proxy answers `429` (it maps the Runpod "no workers available" answer), so the same retry loop works. Runpod often holds the first call instead (no `429`) for up to 300 s at the gateway; a `504` means the cold start took longer, so call again.
 
 ## Evidence
 

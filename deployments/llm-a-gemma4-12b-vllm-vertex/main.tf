@@ -11,6 +11,11 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.10"
     }
+    # Runpod platform. It reads RUNPOD_API_KEY from the env (scripts/hcp-sync.py sets it in the HCP workspace).
+    runpod = {
+      source  = "runpod/runpod"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -27,7 +32,7 @@ provider "google-beta" {
 locals {
   # Platforms of this model, in order. The first one is the default for the old paths without a prefix.
   # See infra/README.md, "Module: model (platforms)".
-  platforms = ["vertex"]
+  platforms = ["vertex", "runpod"]
   # Filled by the weights-copy job (TARGET_DIR).
   model_dir = "gemma-4-12b-it-qat-w4a16"
 }
@@ -59,7 +64,8 @@ module "model" {
     gpu          = "L4"
     max_replicas = 1
     idle_seconds = 300
-    weights      = { hf_repo = "google/gemma-4-12B-it-qat-w4a16-ct", gcs_dir = local.model_dir }
+    # revision: the Hugging Face commit. Runpod downloads exactly this one; Vertex AI reads the copy in gcs_dir.
+    weights = { hf_repo = "google/gemma-4-12B-it-qat-w4a16-ct", revision = "1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee", gcs_dir = local.model_dir }
   }
 
   platform_options = {
@@ -72,5 +78,7 @@ module "model" {
       extra_args    = ["--load-format=runai_streamer", "--kv-cache-dtype=fp8"]
       predict_route = "/v1/chat/completions" # :rawPredict. Without it the adapter uses :invoke for every route.
     }
+    # L4, A5000 or 3090: Ampere has no native FP8, so no --kv-cache-dtype=fp8 here. vLLM downloads the weights at start.
+    runpod = { gpu_pools = ["AMPERE_24"] }
   }
 }

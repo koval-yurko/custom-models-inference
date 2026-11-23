@@ -94,6 +94,7 @@ sequenceDiagram
 
 - `OPTIONS`: the proxy answers it itself. It never calls Vertex AI, so a preflight never starts a GPU.
 - `POST`: the proxy forwards the body to `:rawPredict`, streams the answer back (SSE works) and adds the CORS headers. It keeps the status code, so a 429 reaches the UI as a 429.
+- Platforms: a model on `infra/modules/model` can have several platforms. The first path segment picks one: `/vertex/...` goes to Vertex AI with the proxy SA token, `/runpod/...` goes to the Runpod endpoint with the key `RUNPOD_API_KEY` (Secret Manager secret `runpod-api-key`). The browser never sees the Runpod key. At 0 workers Runpod answers "no workers available". The proxy changes it to 429 with `Retry-After: 30`, so the UI retries in the same way.
 - If the call to Vertex AI fails, the proxy answers 502 with CORS headers and the text `proxy: <cause>`.
 - The code is `infra/modules/cors-proxy/cors_proxy.py` (standard library only) in the stock `python` image. There is no image build.
 - The TTS gateway does not use it: Kokoro answers CORS itself.

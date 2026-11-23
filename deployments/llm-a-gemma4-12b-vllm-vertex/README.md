@@ -1,10 +1,11 @@
 # LLM-A on Vertex AI: Gemma 4 12B QAT (w4a16) on stock vLLM, 1 L4
 
-First deployment of the module `infra/modules/model` with `local.platforms = ["vertex"]` (see `infra/README.md`, section "Module: model (platforms)"). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
+First deployment of the module `infra/modules/model`. It has `local.platforms = ["vertex", "runpod"]` (see `infra/README.md`, section "Module: model (platforms)"). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
 
 - Model `google/gemma-4-12B-it-qat-w4a16-ct`, served as `gemma-4-12b` by `vllm/vllm-openai:v0.33.0` (through the `dockerhub` proxy repo of `infra/core`).
 - Private Vertex AI endpoint in `us-central1`: `g2-standard-12`, 1 `NVIDIA_L4`. It scales to zero (max 1 replica). A replica costs about $1.34 per hour.
 - Weights: `gs://<project_id>-models/gemma-4-12b-it-qat-w4a16/`. Route: `/v1/chat/completions` through `:rawPredict`.
+- Runpod (since 2026-11-23): 1 load balancing endpoint `llm-a-gemma4-12b`, pool `AMPERE_24` (L4, A5000 or 3090), 0 to 1 worker, 300 s idle time. vLLM downloads the weights from Hugging Face at start (commit `1d2c2d7f`). Path: `/runpod/v1/chat/completions`.
 - Public API Gateway `llm-a-gemma4-vertex` checks `x-api-key`. A request without a key never starts a replica. Behind it, the private Cloud Run service `llm-a-gemma4-vertex-proxy` (made by the module) forwards the POST to Vertex AI and adds CORS headers to every answer, also to the 429. It answers `OPTIONS` too.
 
 ## Deploy
@@ -45,7 +46,48 @@ The `ui` output lists the platforms of this model (`platforms = module.model.ui_
 
 1. Run `terraform plan`. Expect only a change of the `ui` output, and no resource change.
 2. Run `terraform apply`, then `./scripts/ui-deploy.py` (a full build, because `ui/` changed).
-3. Open the UI. The LLM-A tab has no platform picker yet (1 platform), and its heading shows `Vertex AI`. The picker shows after a second platform (phase 3, Runpod).
+3. Open the UI. The LLM-A tab has a platform picker with `Vertex AI` and `Runpod` after the Runpod apply below. The picker shows only the deployed platforms. Before it, the tab has no picker (1 platform).
+
+## Runpod (2026-11-23)
+
+Do these steps after the first plan below and the "Test UI and platforms" steps. One-time setup: see [Runpod setup (once)](../../infra/README.md#runpod-setup-once) (account, `RUNPOD_API_KEY`, `./scripts/hcp-sync.py`, `infra/core` apply).
+
+1. Run a plan.
+   ```sh
+   cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init && terraform plan
+   ```
+   Expected:
+   - Create `module.model.module.runpod[0].runpod_template.this` and `runpod_serverless_endpoint.this`.
+   - Create the `secretAccessor` member of the proxy service account on the secret `runpod-api-key`.
+   - Update the proxy Cloud Run service in place: a new `TARGETS` value (with `runpod`), the secret env var `RUNPOD_API_KEY`, and new `args` (the new `cors_proxy.py` with the Runpod 429 mapping).
+   - 1 new API config (the `/runpod/...` path), the old API config destroyed after it, and the gateway updated in place.
+   - The `ui` output gets a second platform.
+   - No replace and no destroy of `google_vertex_ai_endpoint`, `google_api_gateway_gateway` or a service account.
+
+   Warning: if the plan shows anything else, do not apply.
+2. Apply, then run the post-apply steps.
+   ```sh
+   terraform apply && cd ../..
+   ./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex
+   ./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex   # vertex: deployed, runpod: deployed
+   ./scripts/ui-deploy.py
+   ```
+3. Warning: a call starts a Runpod GPU worker. Runpod bills it per second until the 300 s idle time ends. Do the [Test](#test) with the URL `"$GW/runpod/v1/chat/completions"`. At 0 workers the proxy changes the Runpod answer "no workers available" to `429`, so the same loop works.
+4. Fill in this table at the first cold call. Read the raw Runpod answer in the proxy log (the line starts with `runpod cold:`):
+   ```sh
+   gcloud logging read 'resource.labels.service_name="llm-a-gemma4-vertex-proxy" AND textPayload:"runpod cold:"' --limit 5 --format='value(textPayload)'
+   ```
+   If the loop gets a status other than `429` or `200` at once, send the answer to the agent. Only `cold_answer` in `infra/modules/cors-proxy/cors_proxy.py` changes.
+
+| Item | Value |
+|---|---|
+| Raw status and body at 0 workers | No error. Runpod held the first request until the worker was ready, and the proxy wrote no `runpod cold:` line (2026-11-23) |
+| Time from the first call to the first `200` | 182 s, 1 try, no `429` (cold start with the weights download from Hugging Face, 2026-11-23) |
+| Time of a warm call (`max_tokens` 32) | 1 s (2026-11-23) |
+| Second cold call, from the test UI (2026-11-23 08:58 UTC) | 200 after 214.8 s, no retry needed; the UI showed the wait line the whole time |
+| GPU type that Runpod gave | NVIDIA RTX A5000 in CA-MTL-1 (`GET https://api.runpod.io/v2/serverless/<id>/workers`) |
+
+The first cold call did not get a `429`: Runpod holds a request at 0 workers (182 s here). The 429 mapping in the proxy stays as a guard for a "no workers available" answer. The gateway deadline is 300 s, so a cold start that takes longer than about 5 minutes gets a gateway timeout. Then send the call again: the worker is still starting.
 
 ## First plan after the move to the model module (2026-11-22)
 

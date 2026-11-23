@@ -10,6 +10,9 @@ resource "google_service_account" "this" {
 }
 
 resource "google_cloud_run_v2_service" "this" {
+  # A revision with secret env vars fails when its SA cannot read the secret yet: grant secretAccessor first.
+  depends_on = [google_secret_manager_secret_iam_member.secret_env]
+
   project             = var.project_id
   location            = var.region
   name                = var.name

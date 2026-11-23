@@ -14,7 +14,7 @@ variable "name" {
 }
 
 variable "targets" {
-  description = "Platform id -> {url, append_path, auth}. The first path segment of a request picks the target (/vertex/v1/x). append_path = true: the proxy appends the rest of the path to url (Vertex AI :invoke base, Runpod), so the gateway must use APPEND_PATH_TO_ADDRESS. false: url is one fixed URL (Vertex AI :rawPredict). auth: google (the proxy SA token) or runpod (an API key from secret_env)."
+  description = "Platform id -> {url, append_path, auth}. The first path segment of a request picks the target (/vertex/v1/x). append_path = true: the proxy appends the rest of the path to url (Vertex AI :invoke base, Runpod), so the gateway must use APPEND_PATH_TO_ADDRESS. false: url is one fixed URL (Vertex AI :rawPredict). auth: google (the proxy SA token), runpod (an API key from secret_env)."
   type = map(object({
     url         = string
     append_path = bool

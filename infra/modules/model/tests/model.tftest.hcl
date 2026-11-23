@@ -5,6 +5,11 @@ mock_provider "google" {
   }
 }
 mock_provider "google-beta" {}
+mock_provider "runpod" {
+  mock_resource "runpod_serverless_endpoint" {
+    defaults = { request_urls = { base = "https://ep1.api.runpod.ai" } }
+  }
+}
 
 variables {
   project_id     = "p"
@@ -19,7 +24,7 @@ variables {
     health_route = "/health"
     routes       = ["/v1/chat/completions"]
     gpu          = "L4"
-    weights      = { hf_repo = "google/gemma-4-12B-it-qat-w4a16-ct", gcs_dir = "gemma-4-12b-it-qat-w4a16" }
+    weights      = { hf_repo = "google/gemma-4-12B-it-qat-w4a16-ct", revision = "1d2c2d7f2466070e69d6fb3fd5ce9a7d75f2f6ee", gcs_dir = "gemma-4-12b-it-qat-w4a16" }
   }
   platform_options = {
     vertex = {
@@ -104,10 +109,10 @@ run "rejects_duplicates" {
   expect_failures = [var.platforms]
 }
 
-run "rejects_unsupported" {
+run "unknown_platform_fails" {
   command = plan
   variables {
-    platforms = ["runpod"]
+    platforms = ["vertex", "modal"]
   }
   expect_failures = [var.platforms]
 }
@@ -130,5 +135,78 @@ run "ui_platforms" {
   assert {
     condition     = output.ui_platforms[0].base_url == "${output.gateway_url}/vertex" && output.ui_platforms[0].cold_start == "retry-429"
     error_message = "base_url is the gateway URL plus /<id>; cold_start comes from the target"
+  }
+}
+
+run "vertex_and_runpod" {
+  command = apply
+  variables {
+    platforms = ["vertex", "runpod"]
+  }
+
+  assert {
+    condition     = keys(output.targets) == ["runpod", "vertex"] && output.platforms == tolist(["vertex", "runpod"])
+    error_message = "a target per platform; platforms keep their order"
+  }
+  assert {
+    condition     = keys(output.openapi.paths) == ["/runpod/v1/chat/completions", "/v1/chat/completions", "/vertex/v1/chat/completions"]
+    error_message = "the old path plus 1 path per platform"
+  }
+  assert {
+    condition     = jsondecode(module.cors_proxy.env.TARGETS).runpod == { url = "https://ep1.api.runpod.ai", append_path = true, auth = "runpod" }
+    error_message = "the proxy gets the runpod target"
+  }
+  assert {
+    condition     = module.cors_proxy.env.DEFAULT == "vertex"
+    error_message = "the first platform stays the default"
+  }
+  assert {
+    condition     = [for p in output.ui_platforms : p.id] == ["vertex", "runpod"] && output.ui_platforms[1].cold_start == "retry-429"
+    error_message = "ui platforms in order; runpod retries on 429"
+  }
+}
+
+run "proxy_gets_runpod_key" {
+  command = apply
+  variables {
+    platforms = ["vertex", "runpod"]
+  }
+
+  assert {
+    condition     = module.cors_proxy.secret_env == tomap({ RUNPOD_API_KEY = "runpod-api-key" })
+    error_message = "the proxy reads the Runpod key from the secret runpod-api-key"
+  }
+}
+
+run "vertex_only_has_no_secret" {
+  command = apply
+
+  assert {
+    condition     = length(module.cors_proxy.secret_env) == 0
+    error_message = "vertex uses the Google token: no secret env"
+  }
+}
+
+run "runpod_only" {
+  command = apply
+  variables {
+    platforms = ["runpod"]
+  }
+
+  assert {
+    condition     = output.vertex == null && module.cors_proxy.env.DEFAULT == "runpod"
+    error_message = "no vertex output; runpod is the default"
+  }
+  assert {
+    condition     = keys(output.openapi.paths) == ["/runpod/v1/chat/completions", "/v1/chat/completions"]
+    error_message = "the old path and the runpod path"
+  }
+  assert {
+    condition     = module.cors_proxy.predict_bindings == 0
+    error_message = "no aiplatform.user binding without a google target"
+  }
+  assert {
+    condition     = module.cors_proxy.secret_env == tomap({ RUNPOD_API_KEY = "runpod-api-key" })
+    error_message = "a runpod-only proxy still gets the Runpod key"
   }
 }

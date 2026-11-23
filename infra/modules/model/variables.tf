@@ -36,9 +36,8 @@ variable "platforms" {
     error_message = "platforms must not contain an id twice."
   }
   validation {
-    # Phase 1: only the vertex adapter exists. Phase 3 adds runpod.
-    condition     = alltrue([for p in var.platforms : contains(["vertex"], p)])
-    error_message = "Supported platform ids: vertex."
+    condition     = alltrue([for p in var.platforms : contains(["vertex", "runpod"], p)])
+    error_message = "Supported platform ids: vertex, runpod."
   }
 }
 
@@ -56,7 +55,7 @@ variable "spec" {
     idle_seconds = optional(number, 300) # Vertex AI accepts 300 s or more
     weights = optional(object({
       hf_repo  = string
-      revision = optional(string) # required for non-vertex platforms (phase 3)
+      revision = optional(string) # a commit sha; required on runpod
       gcs_dir  = optional(string) # vertex: folder in gs://<project_id>-models
     }))
   })

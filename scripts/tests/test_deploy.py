@@ -27,8 +27,8 @@ class Select(unittest.TestCase):
 
     def test_select_unknown_exits(self):
         with self.assertRaises(SystemExit) as e:
-            deploy.select(["vertex"], {"vertex": V}, "azure")
-        self.assertEqual(str(e.exception), "unknown platform azure; this model has: vertex")
+            deploy.select(["vertex"], {"vertex": V}, "runpod")
+        self.assertEqual(str(e.exception), "unknown platform runpod; this model has: vertex")
 
 
 class GatewayAddress(unittest.TestCase):

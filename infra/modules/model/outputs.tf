@@ -62,3 +62,15 @@ output "vertex_endpoint_dns" {
   description = "Vertex AI endpoint DNS. null without vertex."
   value       = try(module.vertex[0].endpoint_dns, null)
 }
+
+output "runpod_args" {
+  description = "The args string of the Runpod template (for tests). null without runpod."
+  value       = try(module.runpod[0].args, null)
+}
+
+output "scale_watch_ids" {
+  description = "Platform id to the ID that the infra/core job scale-watch prints (Runpod endpoint). Only platforms without GCP logs. For the Slack alerts in alerts.tf."
+  value = merge(
+    contains(var.platforms, "runpod") ? { runpod = module.runpod[0].endpoint_id } : {},
+  )
+}

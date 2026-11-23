@@ -55,6 +55,10 @@ Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway
 To change the code: raise `image_tag` in `variables.tf`, build with the new `_TAG`, run `./scripts/vertex.py undeploy deployments/llm-b-qwen35-9b-fastapi`, then `terraform apply`, then `vertex.py deploy`.
 Do this once for a model deployed before 2026-11-20: it has container logs off, and the Slack alerts need them.
 
+## Next plan after the proxy change (2026-11-23)
+
+The shared file `infra/modules/cors-proxy/cors_proxy.py` changed (it maps the Runpod "no workers available" answer to 429). So the next plan of this deployment shows 1 in-place update of the proxy Cloud Run service `llm-b-qwen35-fastapi-proxy`: only its `args` change. This is expected. Nothing else changes, and the deployed model stays the same.
+
 ## Test
 
 At 0 replicas the first call returns HTTP 429. The loop sends the call again every 30 s, for at most 30 minutes. It prints the time to the first `200`: this is the cold start.

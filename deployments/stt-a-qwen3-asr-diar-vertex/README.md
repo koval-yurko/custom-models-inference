@@ -131,6 +131,10 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```
 6. Test the new routes through the gateway: see [Test](#test) and [Evaluation](#evaluation).
 
+## Next plan after the proxy change (2026-11-23)
+
+The shared file `infra/modules/cors-proxy/cors_proxy.py` changed (it maps the Runpod "no workers available" answer to 429). So the next plan of this deployment shows 1 in-place update of the proxy Cloud Run service `stt-a-qwen3-asr-diar-proxy`: only its `args` change. This is expected. Nothing else changes, and the deployed model stays the same.
+
 ## Evaluation
 
 Compare model setups on your own files. A setup is what made a version: the GPU service adds `setup` (`asr`, `aligner`, `diarization`, `image_tag`) to each answer, from the `SETUP_*` env in `main.tf`, and the STT API service saves it with the version. A version without a `setup` shows as `unknown`.

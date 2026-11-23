@@ -11,5 +11,9 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.10"
     }
+    runpod = {
+      source  = "runpod/runpod"
+      version = "~> 2.0"
+    }
   }
 }

@@ -5,6 +5,7 @@ variables {
   project_id      = "p"
   billing_account = "000000-000000-000000"
   hf_token        = "test"
+  runpod_api_key  = "test"
   slack_bot_token = "test"
   slack_channel   = "#models"
 }
@@ -155,5 +156,47 @@ run "stt_audio_bucket" {
       && contains(google_storage_bucket.stt_audio.cors[0].response_header, "x-goog-content-length-range")
     )
     error_message = "the browser must be able to PUT to the signed upload URL"
+  }
+}
+
+run "runpod_key_secret" {
+  command = plan
+
+  assert {
+    condition     = google_secret_manager_secret.runpod_api_key.secret_id == "runpod-api-key"
+    error_message = "the CORS proxies read the secret runpod-api-key"
+  }
+  assert {
+    condition     = google_secret_manager_secret_version.runpod_api_key.secret_data_wo_version == "1"
+    error_message = "the key is write-only (not in state)"
+  }
+}
+
+run "scale_watch" {
+  command = plan
+
+  assert {
+    condition     = google_cloud_run_v2_job.scale_watch.name == "scale-watch" && google_cloud_scheduler_job.scale_watch.schedule == "* * * * *"
+    error_message = "Cloud Scheduler starts the job scale-watch every minute"
+  }
+  assert {
+    condition     = strcontains(google_cloud_scheduler_job.scale_watch.http_target[0].uri, "/jobs/scale-watch:run")
+    error_message = "the scheduler calls the Cloud Run run API of the job"
+  }
+  assert {
+    condition     = toset([for e in google_cloud_run_v2_job.scale_watch.template[0].template[0].containers[0].env : e.name]) == toset(["STATE_BUCKET", "RUNPOD_API_KEY"])
+    error_message = "the job gets the state bucket and the Runpod key (from Secret Manager)"
+  }
+  assert {
+    condition     = strcontains(google_cloud_run_v2_job.scale_watch.template[0].template[0].containers[0].args[2], "scale-watch: ")
+    error_message = "the job runs scale_watch.py"
+  }
+  assert {
+    condition     = google_storage_bucket.scale_watch.name == "p-scale-watch"
+    error_message = "the state lives in its own small bucket"
+  }
+  assert {
+    condition     = toset([for k, m in google_secret_manager_secret_iam_member.scale_watch : m.secret_id]) == toset(["runpod-api-key"])
+    error_message = "the job SA reads only the Runpod key"
   }
 }

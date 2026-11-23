@@ -9,6 +9,7 @@ variables {
   project_id      = "p"
   billing_account = "000000-000000-000000"
   hf_token        = "test"
+  runpod_api_key  = "test"
   slack_bot_token = "test"
   slack_channel   = "#models"
 }

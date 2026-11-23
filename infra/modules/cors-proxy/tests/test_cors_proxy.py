@@ -46,6 +46,26 @@ class Auth(unittest.TestCase):
             cp.auth_header("runpod", {}, None)
 
 
+class ColdAnswer(unittest.TestCase):
+    def test_runpod_no_workers_is_cold(self):
+        self.assertTrue(cp.cold_answer("runpod", 503, b'{"error":"No workers available"}'))
+
+    def test_runpod_no_workers_on_400_is_cold(self):
+        self.assertTrue(cp.cold_answer("runpod", 400, b"no workers available"))
+
+    def test_runpod_singular_no_worker_is_cold(self):
+        self.assertTrue(cp.cold_answer("runpod", 503, b'{"error":"No worker available"}'))
+
+    def test_runpod_other_error_is_not_cold(self):
+        self.assertFalse(cp.cold_answer("runpod", 500, b'{"error":"CUDA out of memory"}'))
+
+    def test_good_answer_is_never_cold(self):
+        self.assertFalse(cp.cold_answer("runpod", 200, b"no workers"))
+
+    def test_vertex_is_not_mapped(self):
+        self.assertFalse(cp.cold_answer("google", 503, b"no workers available"))
+
+
 class Handler(unittest.TestCase):
     def test_missing_key_gives_502_with_cors(self):
         import http.client, threading
@@ -62,6 +82,59 @@ class Handler(unittest.TestCase):
             self.assertIn(b"RUNPOD_API_KEY", r.read())
         finally:
             srv.shutdown()
+
+
+class FakeUpstream:
+    """Stands in for http.client.HTTPSConnection: answers with a fixed status, headers and body."""
+    answer = (200, [("Content-Type", "text/event-stream")], b"data: 1\n\n")
+
+    def __init__(self, *a, **k):
+        pass
+
+    def request(self, *a, **k):
+        pass
+
+    def getresponse(self):
+        import io
+        status, headers, body = self.answer
+        r = io.BufferedReader(io.BytesIO(body))
+        r.status, r.getheaders = status, lambda: headers
+        return r
+
+    def close(self):
+        pass
+
+
+class Mapping(unittest.TestCase):
+    def call(self, answer):
+        import http.client, os, threading
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT = T, "vertex", 5
+        FakeUpstream.answer = answer
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), cp.H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with mock.patch.object(cp.http.client, "HTTPSConnection", FakeUpstream), mock.patch.dict(os.environ, {"RUNPOD_API_KEY": "k"}):
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=5)
+                c.request("POST", "/runpod/v1/chat/completions", b"{}", {"Content-Type": "application/json"})
+                r = c.getresponse()
+                return r.status, r.getheader("Retry-After"), r.getheader("Access-Control-Allow-Origin"), r.read()
+        finally:
+            srv.shutdown()
+
+    def test_no_workers_becomes_429_with_cors(self):
+        status, retry, cors, body = self.call((503, [("Content-Type", "application/json"), ("retry-after", "5")], b'{"error":"no workers available"}'))
+        self.assertEqual((status, retry, cors), (429, "30", "*"))
+        self.assertIn(b"no workers", body)
+
+    def test_other_error_keeps_status_and_body(self):
+        status, retry, _, body = self.call((500, [("Content-Type", "application/json")], b'{"error":"boom"}'))
+        self.assertEqual((status, retry, body), (500, None, b'{"error":"boom"}'))
+
+    def test_good_answer_streams_through(self):
+        status, _, cors, body = self.call((200, [("Content-Type", "text/event-stream")], b"data: 1\n\ndata: 2\n\n"))
+        self.assertEqual((status, cors, body), (200, "*", b"data: 1\n\ndata: 2\n\n"))
 
 
 class Headers(unittest.TestCase):

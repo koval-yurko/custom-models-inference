@@ -3,7 +3,8 @@
 # which come without them) and forwards GET and POST to the target of the platform with its credential.
 # TARGETS (JSON) maps a platform id to {url, append_path, auth}. The first path segment picks the target
 # (/vertex/v1/x -> vertex, path /v1/x). Any other path goes to DEFAULT with the full path (the old paths).
-import http.client, json, os, time, urllib.request
+# A Runpod answer "no workers available" becomes 429 with Retry-After: 30 (cold_answer), so the UI retries.
+import http.client, json, os, sys, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -57,6 +58,12 @@ def auth_header(auth, environ, google_token):
     return f"Bearer {google_token()}" if auth == "google" else f"Bearer {environ[KEYS[auth]]}"
 
 
+def cold_answer(auth, status, body):
+    """True: the platform has no worker yet, so the proxy answers 429 (the UI retries every 30 s).
+    The Runpod status and body are a guess until the first cold call (spec Open points): change only this function."""
+    return auth == "runpod" and 400 <= status < 600 and b"no worker" in body.lower()  # "no worker(s) available"
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -93,7 +100,15 @@ class H(BaseHTTPRequestHandler):
             msg = json.dumps({"error": f"proxy: {e}"}).encode()
             return self.reply(502, {"Content-Type": "application/json"}, [msg])
         keep = {k: v for k, v in r.getheaders() if k.lower() in ("content-type", "retry-after")}
-        self.reply(r.status, keep, iter(lambda: r.read1(8192), b""))
+        if t["auth"] != "google" and r.status >= 400:  # an error body is small: read it to check for a cold start
+            body = r.read()
+            conn.close()
+            if cold_answer(t["auth"], r.status, body):
+                print(f"{t['auth']} cold: {r.status} {body[:200]!r}", file=sys.stderr)
+                keep = {k: v for k, v in keep.items() if k.lower() != "retry-after"}
+                return self.reply(429, {**keep, "Retry-After": "30"}, [body])
+            return self.reply(r.status, keep, [body] if body else [])
+        self.reply(r.status, keep, iter(lambda: r.read1(8192), b""))  # stream good answers (SSE)
         conn.close()
 
     def do_GET(self):
