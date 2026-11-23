@@ -80,11 +80,11 @@ run "outputs_for_scripts" {
     error_message = "LLM-A runs on vertex (default) and runpod"
   }
   assert {
-    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm-vertex" && output.gateway_id == "llm-a-gemma4-vertex"
+    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm" && output.gateway_id == "llm-a-gemma4"
     error_message = "the Vertex AI name and the gateway ID must stay"
   }
   assert {
-    condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.id == "llm-a-gemma4-vertex"
+    condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.id == "llm-a-gemma4"
     error_message = "the ui base_url is the default platform path"
   }
   assert {

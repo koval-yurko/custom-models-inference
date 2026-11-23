@@ -148,8 +148,8 @@
 
 Warning: Step 2 starts an L4 GPU (about $1.34 per hour) for about 20 to 30 minutes. The endpoint does not answer during the undeploy and deploy.
 
-- [ ] **Step 1: Apply `llm-a`.** Run `direnv exec . terraform plan` in `deployments/llm-a-gemma4-12b-vllm-vertex`. Expected: only the `vertex` output changes (`disableContainerLogging`). Then run `direnv exec . terraform apply -auto-approve`.
-- [ ] **Step 2: Redeploy.** Run `./scripts/vertex.py undeploy deployments/llm-a-gemma4-12b-vllm-vertex`, then `./scripts/vertex.py deploy deployments/llm-a-gemma4-12b-vllm-vertex`. Expected: `Deployed model ID: ...`. Then run `direnv exec . gcloud ai endpoints describe <endpoint_id> --region=us-central1 --format='value(deployedModels[0].disableContainerLogging)'`. Expected: empty or `False`.
+- [ ] **Step 1: Apply `llm-a`.** Run `direnv exec . terraform plan` in `deployments/llm-a-gemma4-12b-vllm`. Expected: only the `vertex` output changes (`disableContainerLogging`). Then run `direnv exec . terraform apply -auto-approve`.
+- [ ] **Step 2: Redeploy.** Run `./scripts/vertex.py undeploy deployments/llm-a-gemma4-12b-vllm`, then `./scripts/vertex.py deploy deployments/llm-a-gemma4-12b-vllm`. Expected: `Deployed model ID: ...`. Then run `direnv exec . gcloud ai endpoints describe <endpoint_id> --region=us-central1 --format='value(deployedModels[0].disableContainerLogging)'`. Expected: empty or `False`.
 - [ ] **Step 3: Read the ready line.** The deploy starts 1 replica (`initialReplicaCount = 1`), so no test call is needed. Run `direnv exec . gcloud logging read 'resource.labels.endpoint_id="<endpoint_id>" AND ("Application startup complete" OR "Shutting down" OR "shutdown complete")' --freshness=1h --limit=20 --format=json`. Expected: an entry with `Application startup complete.`. Record `resource.type`, `logName` and the payload field.
 - [ ] **Step 4: Read the shutdown line.** Wait 10 minutes after the ready line (300 s idle time, then the scale down). Run the Step 3 command again. Expected: an entry with `Application shutdown complete.` from the same resource. If no line comes, record what Vertex AI writes at scale down (for example in `prediction_deployment_observability`).
 - [ ] **Step 5: Update the spec and commit.** Put the real values in the spec table. Close the open point. If a value differs from the Task 6 table, change that table in this plan now.
@@ -181,7 +181,7 @@ Warning: Step 2 starts an L4 GPU (about $1.34 per hour) for about 20 to 30 minut
 ### Task 6: Call `scale-alerts` in the 3 deployments
 
 **Files:**
-- Create: `deployments/tts-a-kokoro-cpu/alerts.tf`, `deployments/llm-a-gemma4-12b-vllm-vertex/alerts.tf`, `deployments/llm-b-qwen35-9b-fastapi/alerts.tf`
+- Create: `deployments/tts-a-kokoro-cpu/alerts.tf`, `deployments/llm-a-gemma4-12b-vllm/alerts.tf`, `deployments/llm-b-qwen35-9b-fastapi/alerts.tf`
 - Test: `tests/alerts.tftest.hcl` in each of the 3 deployments
 
 **Interfaces:**
@@ -195,7 +195,7 @@ Each `alerts.tf` has this content:
 | Root | `title` | `resource_filter` | `ready_text` |
 |---|---|---|---|
 | `tts-a-kokoro-cpu` | `"TTS-A Kokoro"` | `resource.type="cloud_run_revision" AND resource.labels.service_name="${module.service.service_name}"` | `"STARTUP HTTP probe succeeded"` |
-| `llm-a-gemma4-12b-vllm-vertex` | `"LLM-A Gemma 4 12B"` | `resource.type="aiplatform.googleapis.com/Endpoint" AND resource.labels.endpoint_id="${module.model.endpoint_id}"` | `"Application startup complete."` |
+| `llm-a-gemma4-12b-vllm` | `"LLM-A Gemma 4 12B"` | `resource.type="aiplatform.googleapis.com/Endpoint" AND resource.labels.endpoint_id="${module.model.endpoint_id}"` | `"Application startup complete."` |
 | `llm-b-qwen35-9b-fastapi` | `"LLM-B Qwen3.5 9B"` | same as llm-a | `"engine ready"` |
 
 - [ ] **Step 1: Write the failing tests.** Copy the `mock_provider` and `variables` header from the root's `gateway.tftest.hcl`. Add one `run "alerts_watch_own_model"` (`command = apply`) with `override_data { target = data.google_monitoring_notification_channel.slack, values = { name = "projects/p/notificationChannels/1" } }`. Assertions:

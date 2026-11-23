@@ -70,7 +70,7 @@
 | `infra/modules/platform-baseten/{main,variables,outputs,versions}.tf`, `tests/platform_baseten.tftest.hcl` | New adapter |
 | `infra/modules/model/{main,variables,versions,outputs}.tf`, `tests/model.tftest.hcl` | Call the adapter, allow `baseten` |
 | `infra/core/provider_keys.tf`, `infra/core/versions.tf`, `infra/core/variables.tf`, `infra/core/tests/*.tftest.hcl`, `infra/core/.terraform.lock.hcl`, `.envrc`, `.env.example`, `scripts/hcp-sync.py`, `scripts/tests/test_hcp_sync.py` | Baseten key and Hugging Face secret |
-| `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf`, `.terraform.lock.hcl`, `tests/*.tftest.hcl`, `README.md` | LLM-A on `["vertex", "runpod", "baseten"]` |
+| `deployments/llm-a-gemma4-12b-vllm/main.tf`, `.terraform.lock.hcl`, `tests/*.tftest.hcl`, `README.md` | LLM-A on `["vertex", "runpod", "baseten"]` |
 | `infra/README.md`, `docs/backends.md`, `docs/scripts.md`, `docs/auth-and-ui.md`, `CLAUDE.md`, `.claude/skills/verify-gcp/SKILL.md` | Docs |
 
 ---
@@ -215,7 +215,7 @@ git commit -m "feat(core): Baseten API key in Secret Manager and HCP; Hugging Fa
 ### Task 4: LLM-A on `["vertex", "runpod", "baseten"]`
 
 **Files:**
-- Modify: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf`, `.terraform.lock.hcl`, `tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`, `README.md`
+- Modify: `deployments/llm-a-gemma4-12b-vllm/main.tf`, `.terraform.lock.hcl`, `tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`, `README.md`
 
 **Interfaces:**
 - Consumes: the facade with `baseten` (Task 2), output `baseten_config`.
@@ -230,7 +230,7 @@ Both test files: `mock_provider "baseten"` with the `id` default of Task 1. In `
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test`
+Run: `cd deployments/llm-a-gemma4-12b-vllm && terraform init -backend=false && terraform test`
 Expected: FAIL on the path list and on `output.platforms`.
 
 - [ ] **Step 3: Implement**
@@ -239,7 +239,7 @@ Expected: FAIL on the path list and on `output.platforms`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform test` and then `./scripts/check.py` from the repo root
+Run: `cd deployments/llm-a-gemma4-12b-vllm && terraform test` and then `./scripts/check.py` from the repo root
 Expected: all runs pass; check.py prints all roots ok.
 
 - [ ] **Step 5: Write the README section**
@@ -249,14 +249,14 @@ New section "Baseten (2026-11-23)" after "Runpod (2026-11-23)":
 1. One-time setup: link to the infra/README section of Task 5.
 2. Expected `terraform plan`: create `baseten_model` (1 push), create the `secretAccessor` member of the proxy SA on `baseten-api-key`, update the proxy in place (`TARGETS`, new secret env var, timeout 600 s), a new API config with the `/baseten/` path, the gateway updated in place. No Vertex AI endpoint, no Runpod endpoint and no gateway is replaced.
 3. Warning before the apply: the apply waits until the Baseten deployment is active (about 5 to 15 min). This starts 1 L4 replica, billed until `scale_down_delay` (300 s) ends.
-4. After apply: a second `terraform plan` must say "No changes" (the first apply writes the autoscaling after the first push). Check `min_replica = 0` in the Baseten console (model, environment production, autoscaling). Then `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex` (expect `baseten: deployed`), and a full `./scripts/ui-deploy.py`.
+4. After apply: a second `terraform plan` must say "No changes" (the first apply writes the autoscaling after the first push). Check `min_replica = 0` in the Baseten console (model, environment production, autoscaling). Then `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm` (expect `baseten: deployed`), and a full `./scripts/ui-deploy.py`.
 5. Test call: the curl of the "Test" section with `/baseten/v1/chat/completions`. Warning first: a call starts a Baseten replica.
 6. A table to fill at the first cold call: the time to the first answer, and the HTTP status when it is above 600 s (gateway timeout).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add deployments/llm-a-gemma4-12b-vllm-vertex
+git add deployments/llm-a-gemma4-12b-vllm
 git commit -m "feat(llm-a): run on vertex, runpod and baseten"
 ```
 
@@ -298,6 +298,6 @@ git commit -m "docs: Baseten platform (multi-platform phase 4)"
 1. Make the Baseten account and the API key. Put the key in `.env` as `BASETEN_API_KEY`. Today `.env` has no `BASETEN_API_KEY`.
 2. Run `./scripts/hcp-sync.py --dry-run`, then `./scripts/hcp-sync.py`.
 3. Apply `infra/core`. The plan must show only `baseten-api-key`, its version and the Baseten secret `hf_access_token`.
-4. Run `terraform plan` in `deployments/llm-a-gemma4-12b-vllm-vertex`. Compare it with the README section "Baseten (2026-11-23)". Then apply (it starts 1 replica, see the warning).
-5. Run a second `terraform plan` ("No changes"), `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex` and a full `./scripts/ui-deploy.py`.
+4. Run `terraform plan` in `deployments/llm-a-gemma4-12b-vllm`. Compare it with the README section "Baseten (2026-11-23)". Then apply (it starts 1 replica, see the warning).
+5. Run a second `terraform plan` ("No changes"), `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm` and a full `./scripts/ui-deploy.py`.
 6. Make the first cold call to `/baseten/v1/chat/completions` and write the time into the README table.

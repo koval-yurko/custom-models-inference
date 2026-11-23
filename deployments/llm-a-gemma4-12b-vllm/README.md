@@ -1,12 +1,12 @@
-# LLM-A on Vertex AI: Gemma 4 12B QAT (w4a16) on stock vLLM, 1 L4
+# LLM-A on Vertex AI and Runpod: Gemma 4 12B QAT (w4a16) on stock vLLM
 
 First deployment of the module `infra/modules/model`. It has `local.platforms = ["vertex", "runpod"]` (see `infra/README.md`, section "Module: model (platforms)"). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
 
 - Model `google/gemma-4-12B-it-qat-w4a16-ct`, served as `gemma-4-12b` by `vllm/vllm-openai:v0.33.0` (through the `dockerhub` proxy repo of `infra/core`).
 - Private Vertex AI endpoint in `us-central1`: `g2-standard-12`, 1 `NVIDIA_L4`. It scales to zero (max 1 replica). A replica costs about $1.34 per hour.
 - Weights: `gs://<project_id>-models/gemma-4-12b-it-qat-w4a16/`. Route: `/v1/chat/completions` through `:rawPredict`.
-- Runpod (since 2026-11-23): 1 load balancing endpoint `llm-a-gemma4-12b`, pool `AMPERE_24` (L4, A5000 or 3090), 0 to 1 worker, 300 s idle time. vLLM downloads the weights from Hugging Face at start (commit `1d2c2d7f`). Path: `/runpod/v1/chat/completions`.
-- Public API Gateway `llm-a-gemma4-vertex` checks `x-api-key`. A request without a key never starts a replica. Behind it, the private Cloud Run service `llm-a-gemma4-vertex-proxy` (made by the module) forwards the POST to Vertex AI and adds CORS headers to every answer, also to the 429. It answers `OPTIONS` too.
+- Runpod (since 2026-11-23): 1 load balancing endpoint `llm-a-gemma4-12b-vllm`, pool `AMPERE_24` (L4, A5000 or 3090), 0 to 1 worker, 300 s idle time. vLLM downloads the weights from Hugging Face at start (commit `1d2c2d7f`). Path: `/runpod/v1/chat/completions`.
+- Public API Gateway `llm-a-gemma4` checks `x-api-key`. A request without a key never starts a replica. Behind it, the private Cloud Run service `llm-a-gemma4-proxy` (made by the module) forwards the POST to the platform (Vertex AI or Runpod) and adds CORS headers to every answer, also to the 429. It answers `OPTIONS` too.
 
 ## Deploy
 
@@ -24,21 +24,44 @@ Do `infra/core` first (see `infra/README.md`). Run the commands from the repo ro
    ```
 2. Apply.
    ```sh
-   cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init && terraform apply && cd ../..
+   cd deployments/llm-a-gemma4-12b-vllm && terraform init && terraform apply && cd ../..
    ```
 3. Fill the image cache, upload and deploy the model. The script fills the cache first and stops if the answer is not `200`. It takes up to 45 minutes.
    ```sh
-   ./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm-vertex
-   ./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex   # vertex: deployed
+   ./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm
+   ./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm   # vertex: deployed
    ```
 4. Turn on streaming, then update the UI.
    ```sh
-   ./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex
+   ./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm
    ./scripts/ui-deploy.py
    ```
 
-To change the image, the args or the machine: run `./scripts/deploy.py undeploy deployments/llm-a-gemma4-12b-vllm-vertex`, then `terraform apply`, then `./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm-vertex`.
+To change the image, the args or the machine: run `./scripts/deploy.py undeploy deployments/llm-a-gemma4-12b-vllm`, then `terraform apply`, then `./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm`.
 Do this once for a model deployed before 2026-11-20: it has container logs off, and the Slack alerts need them.
+
+## Rename (2026-11-23)
+
+The deployment had the name `llm-a-gemma4-12b-vllm-vertex`. It has several platforms now, so the `-vertex` suffix is gone from 3 names:
+
+| Old | New |
+|---|---|
+| Folder and HCP workspace `custom-models-llm-a-gemma4-12b-vllm-vertex` | `custom-models-llm-a-gemma4-12b-vllm` |
+| Vertex AI name `llm-a-gemma4-12b-vllm-vertex` | `llm-a-gemma4-12b-vllm` |
+| Gateway ID `llm-a-gemma4-vertex` (CORS proxy `llm-a-gemma4-vertex-proxy`) | `llm-a-gemma4` (CORS proxy `llm-a-gemma4-proxy`) |
+
+The old deployment was destroyed on 2026-11-23 (`deploy.py undeploy`, then `terraform destroy` in the old workspace: 17 resources on Vertex AI, Cloud Run and Runpod). The new names start from an empty state. Run the commands from the repo root.
+
+1. Make the new HCP workspace.
+   ```sh
+   ./scripts/hcp-sync.py --dry-run && ./scripts/hcp-sync.py
+   ```
+2. Apply `infra/core`. Expect: create the API `llm-a-gemma4` (API, placeholder config, service), delete the old API `llm-a-gemma4-vertex`, and an update in place of the API key `models-gateways`.
+   ```sh
+   cd infra/core && terraform plan && terraform apply && cd ../..
+   ```
+3. Do the steps in [Deploy](#deploy) from step 2. The gateway URL is new, so do step 4 (streaming and UI) too. The UI tab ID is now `llm-a-gemma4`, so an old link `#/llm-a-gemma4-vertex` opens the first tab.
+4. Delete the empty HCP workspace `custom-models-llm-a-gemma4-12b-vllm-vertex` in the HCP UI.
 
 ## Test UI and platforms (2026-11-23)
 
@@ -54,7 +77,7 @@ Do these steps after the first plan below and the "Test UI and platforms" steps.
 
 1. Run a plan.
    ```sh
-   cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init && terraform plan
+   cd deployments/llm-a-gemma4-12b-vllm && terraform init && terraform plan
    ```
    Expected:
    - Create `module.model.module.runpod[0].runpod_template.this` and `runpod_serverless_endpoint.this`.
@@ -68,14 +91,14 @@ Do these steps after the first plan below and the "Test UI and platforms" steps.
 2. Apply, then run the post-apply steps.
    ```sh
    terraform apply && cd ../..
-   ./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex
-   ./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex   # vertex: deployed, runpod: deployed
+   ./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm
+   ./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm   # vertex: deployed, runpod: deployed
    ./scripts/ui-deploy.py
    ```
 3. Warning: a call starts a Runpod GPU worker. Runpod bills it per second until the 300 s idle time ends. Do the [Test](#test) with the URL `"$GW/runpod/v1/chat/completions"`. At 0 workers the proxy changes the Runpod answer "no workers available" to `429`, so the same loop works.
 4. Fill in this table at the first cold call. Read the raw Runpod answer in the proxy log (the line starts with `runpod cold:`):
    ```sh
-   gcloud logging read 'resource.labels.service_name="llm-a-gemma4-vertex-proxy" AND textPayload:"runpod cold:"' --limit 5 --format='value(textPayload)'
+   gcloud logging read 'resource.labels.service_name="llm-a-gemma4-proxy" AND textPayload:"runpod cold:"' --limit 5 --format='value(textPayload)'
    ```
    If the loop gets a status other than `429` or `200` at once, send the answer to the agent. Only `cold_answer` in `infra/modules/cors-proxy/cors_proxy.py` changes.
 
@@ -94,7 +117,7 @@ The first cold call did not get a `429`: Runpod holds a request at 0 workers (18
 The resources moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` into `infra/modules/model` (`moved.tf`). Run a plan before the first apply after this change:
 
 ```sh
-cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init && terraform plan
+cd deployments/llm-a-gemma4-12b-vllm && terraform init && terraform plan
 ```
 
 Expected:
@@ -106,14 +129,14 @@ Expected:
 
 Warning: if the plan shows anything else, do not apply. A replaced endpoint gets a new ID, and a replaced gateway gets a new URL.
 
-After the apply, run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex` (it does nothing when the gateway still streams). Then do the test below on both paths. The deployed model does not change: the new flag order goes to Vertex AI only after the next `undeploy` and `deploy`.
+After the apply, run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm` (it does nothing when the gateway still streams). Then do the test below on both paths. The deployed model does not change: the new flag order goes to Vertex AI only after the next `undeploy` and `deploy`.
 
 ## Test
 
 At 0 replicas the first call returns HTTP 429. The loop sends the call again every 30 s, for at most 30 minutes.
 
 ```sh
-cd deployments/llm-a-gemma4-12b-vllm-vertex
+cd deployments/llm-a-gemma4-12b-vllm
 GW=$(terraform output -raw gateway_url)
 KEY=$(cd ../../infra/core && terraform output -raw api_key)
 for i in $(seq 1 60); do
@@ -150,8 +173,8 @@ Slack: after a cold start, the channel gets `🟢 LLM-A Gemma 4 12B is ready`. A
 Undeploy first. Vertex AI does not delete an endpoint that has a deployed model.
 
 ```sh
-./scripts/deploy.py undeploy deployments/llm-a-gemma4-12b-vllm-vertex
-cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform destroy
+./scripts/deploy.py undeploy deployments/llm-a-gemma4-12b-vllm
+cd deployments/llm-a-gemma4-12b-vllm && terraform destroy
 ```
 
-The weights stay in the bucket. To remove the gateway API too, remove `llm-a-gemma4-vertex` from `local.gateway_apis` in `infra/core/gateways.tf` and apply `infra/core/`.
+The weights stay in the bucket. To remove the gateway API too, remove `llm-a-gemma4` from `local.gateway_apis` in `infra/core/gateways.tf` and apply `infra/core/`.

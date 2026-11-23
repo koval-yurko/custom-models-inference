@@ -64,7 +64,7 @@
 | `infra/modules/model/{main,variables,versions}.tf`, `tests/model.tftest.hcl` | Call the adapter, allow `runpod`, proxy `secret_env` |
 | `infra/modules/cors-proxy/cors_proxy.py`, `tests/test_cors_proxy.py` | `cold_answer` and the 429 mapping |
 | `infra/core/provider_keys.tf` (new), `infra/core/variables.tf`, `infra/core/tests/core.tftest.hcl`, `.envrc`, `.env.example`, `scripts/hcp-sync.py`, `scripts/tests/test_hcp_sync.py` (new) | Runpod key |
-| `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf`, `.terraform.lock.hcl`, `tests/*.tftest.hcl`, `README.md` | LLM-A on `["vertex", "runpod"]` |
+| `deployments/llm-a-gemma4-12b-vllm/main.tf`, `.terraform.lock.hcl`, `tests/*.tftest.hcl`, `README.md` | LLM-A on `["vertex", "runpod"]` |
 | `infra/README.md`, `docs/backends.md`, `docs/scripts.md`, `CLAUDE.md`, `.claude/skills/verify-gcp/SKILL.md` | Docs |
 
 ---
@@ -293,7 +293,7 @@ git commit -m "feat(core): Runpod API key in Secret Manager and in every HCP wor
 ### Task 5: LLM-A on `["vertex", "runpod"]`
 
 **Files:**
-- Modify: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf`, `.terraform.lock.hcl`, `tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`, `README.md`
+- Modify: `deployments/llm-a-gemma4-12b-vllm/main.tf`, `.terraform.lock.hcl`, `tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`, `README.md`
 
 **Interfaces:**
 - Consumes: the facade with `runpod` (Task 2). `ui_platforms` (phase 2).
@@ -308,7 +308,7 @@ In both test files: add `mock_provider "runpod"` with the `request_urls` default
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test`
+Run: `cd deployments/llm-a-gemma4-12b-vllm && terraform init -backend=false && terraform test`
 Expected: FAIL on the path list and on `output.platforms`.
 
 - [ ] **Step 3: Implement**
@@ -317,7 +317,7 @@ Expected: FAIL on the path list and on `output.platforms`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform test` and then `./scripts/check.py` from the repo root
+Run: `cd deployments/llm-a-gemma4-12b-vllm && terraform test` and then `./scripts/check.py` from the repo root
 Expected: all runs pass; check.py prints all roots ok.
 
 - [ ] **Step 5: Write the README section**
@@ -326,7 +326,7 @@ New section "Runpod (2026-11-23)" in the LLM-A README, before "Test":
 
 1. One-time setup: link to the infra/README section of Task 6.
 2. Expected `terraform plan`: create `runpod_template` and `runpod_serverless_endpoint`, create the `secretAccessor` member of the proxy SA on `runpod-api-key`, update the proxy service in place (new `TARGETS`, new secret env var), a new API config with the `/runpod/` path, the gateway updated in place. No Vertex AI endpoint and no gateway is replaced.
-3. After apply: `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex`, then `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex` (expect `runpod: deployed`), then a full `./scripts/ui-deploy.py`.
+3. After apply: `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm`, then `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm` (expect `runpod: deployed`), then a full `./scripts/ui-deploy.py`.
 4. Test call: the curl of the "Test" section with `/runpod/v1/chat/completions`. Warning first: a call starts a Runpod GPU worker, billed per second until `idle_timeout` (300 s) ends.
 5. A table to fill at the first cold call: the HTTP status and body at 0 workers (the `runpod cold:` line in the proxy log), the time to the first answer, and the GPU type that Runpod gave.
 
@@ -335,7 +335,7 @@ Update the "Test UI and platforms" section: the tab now shows the picker with Ve
 - [ ] **Step 6: Commit**
 
 ```bash
-git add deployments/llm-a-gemma4-12b-vllm-vertex
+git add deployments/llm-a-gemma4-12b-vllm
 git commit -m "feat(llm-a): run on vertex and runpod"
 ```
 
@@ -379,6 +379,6 @@ Do these steps after the phase 1 and phase 2 applies of LLM-A.
 1. Make the Runpod account and the API key. Put the key in `.env` as `RUNPOD_API_KEY`.
 2. Run `./scripts/hcp-sync.py --dry-run`, then `./scripts/hcp-sync.py`.
 3. Apply `infra/core`. The plan must show only the new secret `runpod-api-key` and its version.
-4. Run `terraform plan` in `deployments/llm-a-gemma4-12b-vllm-vertex`. Compare it with the README section "Runpod (2026-11-23)". Then apply.
-5. Run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm-vertex` and a full `./scripts/ui-deploy.py`.
+4. Run `terraform plan` in `deployments/llm-a-gemma4-12b-vllm`. Compare it with the README section "Runpod (2026-11-23)". Then apply.
+5. Run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm`, `./scripts/deploy.py status deployments/llm-a-gemma4-12b-vllm` and a full `./scripts/ui-deploy.py`.
 6. Record the cold answer: make the first call to `/runpod/v1/chat/completions`. Write the raw status and body at 0 workers, the cold start time and the GPU type into the README table. If the raw answer does not match `cold_answer`, send it to the agent: only that function changes.

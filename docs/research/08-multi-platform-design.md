@@ -56,7 +56,7 @@ deployments/<name>/
   backend.tf, README.md   Unchanged.
 ```
 
-The folder names stay as they are (for example `llm-a-gemma4-12b-vllm-vertex`). A rename changes the HCP workspace and needs a state move. A later card can do that.
+The folder names stay as they are. Update 2026-11-23: LLM-A was renamed from `llm-a-gemma4-12b-vllm` to `llm-a-gemma4-12b-vllm` (folder, HCP workspace, Vertex AI name and gateway ID). See its README, section "Rename (2026-11-23)".
 
 ### The model spec
 
@@ -73,7 +73,7 @@ module "model" {
   project_id = var.project_id
   region     = var.region
   name       = "llm-a-gemma4-12b"   # base of all names on all platforms
-  gateway_id = "llm-a-gemma4-vertex" # the existing API in infra/core/gateways.tf
+  gateway_id = "llm-a-gemma4" # the existing API in infra/core/gateways.tf
   platforms  = local.platforms
 
   spec = {
@@ -233,7 +233,7 @@ Platform:  [ Vertex AI ]  [ Runpod ]  [ Baseten ]
 
 ```json
 {
-  "id": "llm-a-gemma4-vertex",
+  "id": "llm-a-gemma4",
   "title": "LLM-A Gemma 4 12B",
   "type": "llm",
   "base_url": "https://<gateway>/vertex",

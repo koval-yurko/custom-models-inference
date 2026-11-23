@@ -16,7 +16,7 @@ variables {
   region         = "us-central1"
   gateway_region = "europe-west1"
   name           = "llm-a-gemma4-12b"
-  gateway_id     = "llm-a-gemma4-vertex"
+  gateway_id     = "llm-a-gemma4"
   platforms      = ["vertex"]
   spec = {
     image        = { stock = "vllm/vllm-openai:v0.33.0" }
@@ -28,7 +28,7 @@ variables {
   }
   platform_options = {
     vertex = {
-      name                  = "llm-a-gemma4-12b-vllm-vertex"
+      name                  = "llm-a-gemma4-12b-vllm"
       machine_type          = "g2-standard-12"
       shared_memory_size_mb = 16384
       extra_args            = ["--load-format=runai_streamer", "--kv-cache-dtype=fp8"]
@@ -84,7 +84,7 @@ run "names_unchanged" {
   command = apply
 
   assert {
-    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm-vertex" && output.gateway_id == "llm-a-gemma4-vertex"
+    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm" && output.gateway_id == "llm-a-gemma4"
     error_message = "the Vertex AI name and the gateway ID must stay"
   }
   assert {

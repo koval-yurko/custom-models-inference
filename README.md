@@ -4,7 +4,7 @@ Terraform code that serves open-weight models as private, scale-to-zero services
 
 | Model | Folder | Runs on |
 |---|---|---|
-| LLM: Gemma 4 12B (vLLM) | `deployments/llm-a-gemma4-12b-vllm-vertex` | Vertex AI, 1 L4 GPU |
+| LLM: Gemma 4 12B (vLLM) | `deployments/llm-a-gemma4-12b-vllm` | Vertex AI (1 L4 GPU) and Runpod (1 L4, A5000 or 3090) |
 | LLM: Qwen3.5-9B FP8 (own FastAPI + vLLM image) | `deployments/llm-b-qwen35-9b-fastapi` | Vertex AI, 1 L4 GPU, no gateway yet |
 | STT: Qwen3-ASR + Pyannote speakers (own image, Gemini Transcribe API) | `deployments/stt-a-qwen3-asr-diar` | Vertex AI (1 L4 GPU) and Runpod (1 GPU of 24 GB), plus a CPU upload service |
 | TTS: Kokoro | `deployments/tts-a-kokoro-cpu` | Cloud Run, CPU |
@@ -41,7 +41,7 @@ Steps, in this order:
 1. **Core.** `cd infra/core && terraform init && terraform plan && terraform apply`.
    Check: the plan says "No changes" after the apply.
 2. **Each model.** Follow the README of its folder. It has the exact commands for that model: the weights copy, the apply, the model deploy (Vertex AI), the gateway streaming and the test call.
-   - [`deployments/llm-a-gemma4-12b-vllm-vertex`](deployments/llm-a-gemma4-12b-vllm-vertex/README.md)
+   - [`deployments/llm-a-gemma4-12b-vllm`](deployments/llm-a-gemma4-12b-vllm/README.md)
    - [`deployments/llm-b-qwen35-9b-fastapi`](deployments/llm-b-qwen35-9b-fastapi/README.md) (also builds its image with Cloud Build)
    - [`deployments/stt-a-qwen3-asr-diar`](deployments/stt-a-qwen3-asr-diar/README.md) (also builds its image with Cloud Build)
    - [`deployments/tts-a-kokoro-cpu`](deployments/tts-a-kokoro-cpu/README.md)

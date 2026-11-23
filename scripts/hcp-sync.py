@@ -46,7 +46,7 @@ WORKSPACES = {
                                       "runpod_s3_access_key": E("RUNPOD_S3_ACCESS_KEY"), "runpod_s3_secret_key": E("RUNPOD_S3_SECRET_KEY")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
-    "custom-models-llm-a-gemma4-12b-vllm-vertex": ("deployments/llm-a-gemma4-12b-vllm-vertex", COMMON),
+    "custom-models-llm-a-gemma4-12b-vllm": ("deployments/llm-a-gemma4-12b-vllm", COMMON),
     "custom-models-llm-b-qwen35-9b-fastapi": ("deployments/llm-b-qwen35-9b-fastapi", COMMON),
     # STT-A. The folder lost its "-vertex" suffix (it runs on several platforms). The workspace keeps the old name, so the state stays.
     "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar", COMMON),

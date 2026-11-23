@@ -61,7 +61,7 @@ Description:
 Move LLM-A from Cloud Run to a Vertex AI endpoint.
 
 Scope:
-- New folder deployments/llm-a-gemma4-12b-vllm-vertex/. It calls infra/modules/vertex-model/.
+- New folder deployments/llm-a-gemma4-12b-vllm/. It calls infra/modules/vertex-model/.
 - Stock vllm/vllm-openai, flags only. Add --host 0.0.0.0 --port 8080. Use the same weights folder as the Cloud Run version (gs://<project_id>-models/<TARGET_DIR>/).
 - Machine: g2-standard-8 with 1 NVIDIA_L4, shared memory 16384 MB, deployment timeout 1800 s.
 - Routes: health /health. Predict /v1/chat/completions through :rawPredict, or :invoke with /* for the full OpenAI API.

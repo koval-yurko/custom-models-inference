@@ -31,7 +31,7 @@ The signal for "ready" is the line after the model is loaded, not the instance s
 | Deployment | Scale up: ready | Scale down | Verified in real logs |
 |---|---|---|---|
 | `tts-a-kokoro-cpu` (Cloud Run) | `run.googleapis.com/varlog/system`: `STARTUP HTTP probe succeeded` | `run.googleapis.com/stderr`: `Application shutdown complete.` | Yes, 13 to 17 Nov 2026 |
-| `llm-a-gemma4-12b-vllm-vertex` (Vertex AI) | `Application startup complete.` (vLLM loads the model before it starts uvicorn) | `Application shutdown complete.` | Ready: yes, 2026-11-20 10:55:30 UTC. Scale down: same uvicorn stack as llm-b |
+| `llm-a-gemma4-12b-vllm` (Vertex AI) | `Application startup complete.` (vLLM loads the model before it starts uvicorn) | `Application shutdown complete.` | Ready: yes, 2026-11-20 10:55:30 UTC. Scale down: same uvicorn stack as llm-b |
 | `llm-b-qwen35-9b-fastapi` (Vertex AI) | A new line `engine ready` | `Application shutdown complete.` | Yes: ready 10:02:28 and 10:51:10, shutdown 10:08:14 UTC on 2026-11-20 |
 
 - `llm-b` starts uvicorn before the model loads (`load_engine` runs in a thread, so the TCP liveness probe passes). So `Application startup complete.` comes too early. The image prints `engine ready` after `AsyncLLM.from_engine_args` returns. This needs an image rebuild.

@@ -17,7 +17,7 @@ variables {
     weights      = { hf_repo = "google/gemma-4-12B-it-qat-w4a16-ct", revision = null, gcs_dir = "gemma-4-12b-it-qat-w4a16" }
   }
   options = {
-    name                  = "llm-a-gemma4-12b-vllm-vertex"
+    name                  = "llm-a-gemma4-12b-vllm"
     machine_type          = "g2-standard-12"
     shared_memory_size_mb = 16384
     deployment_timeout    = "1800s"
@@ -46,7 +46,7 @@ run "same_upload_as_today" {
     error_message = "vertex reads the weights from GCS: HF_HUB_OFFLINE=1"
   }
   assert {
-    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm-vertex"
+    condition     = output.vertex.name == "llm-a-gemma4-12b-vllm"
     error_message = "options.name keeps the current Vertex AI name (the endpoint ID is a hash of it)"
   }
   assert {
@@ -93,7 +93,7 @@ run "target_invoke_without_predict_route" {
   command = apply
 
   variables {
-    options = { name = "llm-a-gemma4-12b-vllm-vertex" }
+    options = { name = "llm-a-gemma4-12b-vllm" }
   }
 
   assert {

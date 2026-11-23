@@ -7,8 +7,6 @@ locals {
   # Add a line here and apply this root before you apply the new deployment.
   gateway_apis = [
     "tts-a-kokoro-cpu",
-    # The live LLM-A gateway uses "llm-a-gemma4" (changed by another card on 2026-11-23, not yet on master). The LLM-A
-    # deployment of this branch still says "llm-a-gemma4-vertex": align it when that card merges.
     "llm-a-gemma4",
     "llm-b-qwen35-fastapi",
     "stt-a-qwen3-asr-diar",

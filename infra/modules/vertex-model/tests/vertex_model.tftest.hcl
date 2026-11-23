@@ -3,7 +3,7 @@ mock_provider "google" {}
 variables {
   project_id     = "p"
   region         = "europe-west4"
-  name           = "llm-a-gemma4-12b-vllm-vertex"
+  name           = "llm-a-gemma4-12b-vllm"
   image          = "europe-west4-docker.pkg.dev/p/dockerhub/vllm/vllm-openai:v0.33.0"
   args           = ["--model=$(AIP_STORAGE_URI)", "--load-format=runai_streamer"]
   predict_route  = "/v1/chat/completions"

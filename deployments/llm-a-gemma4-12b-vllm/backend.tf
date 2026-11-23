@@ -3,7 +3,7 @@
 terraform {
   cloud {
     workspaces {
-      name = "custom-models-llm-a-gemma4-12b-vllm-vertex"
+      name = "custom-models-llm-a-gemma4-12b-vllm"
     }
   }
 }

@@ -34,7 +34,7 @@ Each platform must add one adapter, not a copy of the deployment code. A new pla
 - Automatic failover. The UI does not switch platform by itself when one fails. The user picks.
 - A live "warm or cold" badge per platform in the UI. A later card can add it.
 - One budget across all platforms. Each platform keeps its own billing and limits.
-- Renaming the deployment folders (for example `llm-a-gemma4-12b-vllm-vertex`). A rename changes the HCP workspace and needs a state move. A later card can do it.
+- Renaming the deployment folders. A rename changes the HCP workspace and needs a state move. Update 2026-11-23: a later card renamed LLM-A from `llm-a-gemma4-12b-vllm` to `llm-a-gemma4-12b-vllm`.
 - Load balancing over platforms, or several replicas per platform. `max_replicas` stays 1.
 
 ## Anti-goals
@@ -134,7 +134,7 @@ infra/modules/
 ### Deployment folder after the change
 
 ```hcl
-# deployments/llm-a-gemma4-12b-vllm-vertex/main.tf
+# deployments/llm-a-gemma4-12b-vllm/main.tf
 locals {
   platforms = ["vertex", "runpod", "baseten"] # first = default in the UI and for the old paths
   model_dir = "gemma-4-12b-it-qat-w4a16"      # weights-copy TARGET_DIR (vertex)
@@ -146,7 +146,7 @@ module "model" {
   project_id = var.project_id
   region     = var.region
   name       = "llm-a-gemma4-12b"              # base name on Baseten and Runpod
-  gateway_id = "llm-a-gemma4-vertex"          # the API in infra/core/gateways.tf
+  gateway_id = "llm-a-gemma4"          # the API in infra/core/gateways.tf
   platforms  = local.platforms
 
   spec = {
@@ -164,7 +164,7 @@ module "model" {
 
   platform_options = {
     vertex = {
-      name                  = "llm-a-gemma4-12b-vllm-vertex" # the current Vertex AI name: keeps the endpoint ID
+      name                  = "llm-a-gemma4-12b-vllm" # Vertex AI name: the endpoint ID and the service account ID come from it
       machine_type          = "g2-standard-12"
       shared_memory_size_mb = 16384
       deployment_timeout    = "1800s"

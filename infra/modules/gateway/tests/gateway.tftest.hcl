@@ -4,7 +4,7 @@ mock_provider "google-beta" {}
 variables {
   project_id  = "p"
   region      = "us-central1"
-  gateway_id  = "llm-a-gemma4-vertex"
+  gateway_id  = "llm-a-gemma4"
   backend_url = "https://proxy"
   platforms   = ["vertex"]
   routes      = ["/v1/chat/completions"]

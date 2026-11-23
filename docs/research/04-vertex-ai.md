@@ -89,7 +89,7 @@ This card blocks all other Vertex AI cards.
 
 ### New: LLM-A on Vertex AI
 
-1. New folder `deployments/llm-a-gemma4-12b-vllm-vertex/`. Stock `vllm/vllm-openai`, flags only.
+1. New folder `deployments/llm-a-gemma4-12b-vllm/`. Stock `vllm/vllm-openai`, flags only.
 2. Routes: health `/health`. Predict `/v1/chat/completions` through `:rawPredict`, or `:invoke` with `/*` for the full OpenAI API.
 3. Done when: a chat call returns text, the endpoint scales to 0, and `terraform destroy` removes it.
 4. After that, the user decides to keep or destroy the Cloud Run version as a reference.

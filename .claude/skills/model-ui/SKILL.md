@@ -46,7 +46,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 
 - `scripts/ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`), and the tab when no platform is left. Then `base_url` is the first platform that is left.
 - The tab shows a platform picker when 2 or more platforms are left. The panel gets `base_url` and `cold_start` of the chosen platform; the panel code does not change. The choice stays in `localStorage` per model and in the hash `#/<tab>@<platform>` (an STT link is `#/<tab>@<platform>/<file id>` or `#/<tab>/<file id>`).
-- Examples: `deployments/llm-a-gemma4-12b-vllm-vertex/outputs.tf`, `deployments/stt-a-qwen3-asr-diar/outputs.tf` (STT: the files paths get the same `/<platform>` prefix, so the panel works on each platform with no change). Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.
+- Examples: `deployments/llm-a-gemma4-12b-vllm/outputs.tf`, `deployments/stt-a-qwen3-asr-diar/outputs.tf` (STT: the files paths get the same `/<platform>` prefix, so the panel works on each platform with no change). Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.
 
 `features` by type (the panel reads only these keys; add a key when you add a feature):
 
@@ -64,7 +64,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 
 1. Do the gateway steps in `infra/README.md`, "Add a gateway to a new deployment". Also add `alerts.tf` ("Add scale alerts to a new deployment"); `check.py` fails without it.
 2. In `gateway.tf`, give every path an `options` operation with `security = []` (the CORS preflight has no key). Copy the pattern from `deployments/tts-a-kokoro-cpu/gateway.tf`.
-3. Check that the backend answers CORS: `OPTIONS` with `Access-Control-Allow-Origin` and `Access-Control-Allow-Headers` that allow `x-api-key`. Kokoro-FastAPI does it by default. Vertex AI does not (no `OPTIONS` answer, no CORS headers on any answer): call the module `infra/modules/cors-proxy` (see `deployments/llm-a-gemma4-12b-vllm-vertex/cors_proxy.tf`) and set the gateway backend to its URL. For a custom image on Cloud Run, add CORS middleware (FastAPI `CORSMiddleware`, origins `*`).
+3. Check that the backend answers CORS: `OPTIONS` with `Access-Control-Allow-Origin` and `Access-Control-Allow-Headers` that allow `x-api-key`. Kokoro-FastAPI does it by default. Vertex AI does not (no `OPTIONS` answer, no CORS headers on any answer): call the module `infra/modules/cors-proxy` (see `deployments/llm-a-gemma4-12b-vllm/cors_proxy.tf`) and set the gateway backend to its URL. For a custom image on Cloud Run, add CORS middleware (FastAPI `CORSMiddleware`, origins `*`).
 4. Copy `tests/gateway.tftest.hcl`; it checks the `options` operations. Run `terraform init -backend=false && terraform test`.
 5. Add the `ui` output to `outputs.tf`.
 6. Tell the user to apply (and run `scripts/gateway-streaming.py` if streaming). The agent does not apply.

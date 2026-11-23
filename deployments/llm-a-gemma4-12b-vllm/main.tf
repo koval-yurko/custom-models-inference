@@ -43,8 +43,8 @@ module "model" {
   project_id     = var.project_id
   region         = var.region
   gateway_region = var.gateway_region
-  name           = "llm-a-gemma4-12b"    # base name on every platform
-  gateway_id     = "llm-a-gemma4-vertex" # the API in infra/core/gateways.tf
+  name           = "llm-a-gemma4-12b-vllm" # base name on every platform (Vertex AI name, Runpod template and endpoint)
+  gateway_id     = "llm-a-gemma4"          # the API in infra/core/gateways.tf
   platforms      = local.platforms
 
   spec = {
@@ -70,7 +70,6 @@ module "model" {
 
   platform_options = {
     vertex = {
-      name                  = "llm-a-gemma4-12b-vllm-vertex" # the current Vertex AI name: keeps the endpoint ID
       machine_type          = "g2-standard-12"
       shared_memory_size_mb = 16384
       deployment_timeout    = "1800s"

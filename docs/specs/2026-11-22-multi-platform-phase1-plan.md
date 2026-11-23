@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - No change in behavior for LLM-A: the endpoint, the gateway, the gateway URL and the Slack alerts stay. The old path `/v1/chat/completions` keeps working.
-- Names stay exactly: Vertex AI name `llm-a-gemma4-12b-vllm-vertex`, gateway ID `llm-a-gemma4-vertex`, gateway SA ID `llm-a-gemma4-vertex-gw`, proxy service `llm-a-gemma4-vertex-proxy`, HCP workspace `custom-models-llm-a-gemma4-12b-vllm-vertex`.
+- Names stay exactly: Vertex AI name `llm-a-gemma4-12b-vllm`, gateway ID `llm-a-gemma4`, gateway SA ID `llm-a-gemma4-gw`, proxy service `llm-a-gemma4-proxy`, HCP workspace `custom-models-llm-a-gemma4-12b-vllm`.
 - Phase 1 supports only the platform id `vertex`. The facade rejects `baseten` and `runpod` until phases 3 and 4 add their adapters.
 - LLM-B, STT-A and TTS-A keep their behavior. The only change in LLM-B and STT-A is the `cors-proxy` call (`target` → `targets`, Task 2). TTS-A does not change. `infra/modules/vertex-model` keeps its variables and outputs.
 - `required_version = ">= 1.11"` in the new modules and in the LLM-A root. The other roots keep `>= 1.7`.
@@ -95,13 +95,13 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
 
 **Interfaces:**
 - Produces: variables `project_id`, `region` (the gateway region), `gateway_id` (max 27 chars, validation), `backend_url` (https), `platforms` (`list(string)`, ordered, first = default), `routes` (`list(string)`, each starts with `/`), `methods` (`list(string)`, default `["post"]`), `deadlines` (`map(number)`, key = platform id), `extra_paths` (`map(object({ backend_url = string, methods = list(string), deadline = number }))`, default `{}`). Outputs: `gateway_url` (`https://<default_hostname>`), `gateway_id`, `gateway_region`, `api_config` (full ID), `service_account_email`, `address` (the string `"google_api_gateway_gateway.this"`), `openapi` (the object, for tests).
-- Resources: copy the 3 resources from `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf` (`google_service_account.this` with `account_id = "${var.gateway_id}-gw"`, `google_api_gateway_api_config.this` with `create_before_destroy`, `google_api_gateway_gateway.this`). Use `google-beta` where the source does.
+- Resources: copy the 3 resources from `deployments/llm-a-gemma4-12b-vllm/gateway.tf` (`google_service_account.this` with `account_id = "${var.gateway_id}-gw"`, `google_api_gateway_api_config.this` with `create_before_destroy`, `google_api_gateway_gateway.this`). Use `google-beta` where the source does.
 - OpenAPI rules: the spec section "Gateway module", items 1 to 5. Each operation has its own `x-google-backend = { address, path_translation = "APPEND_PATH_TO_ADDRESS", deadline }`. No top-level `x-google-backend`. Global `security = [{ api_key = [] }]` and `securityDefinitions.api_key = { type = "apiKey", name = "x-api-key", in = "header" }`, as today.
 
-- [ ] **Step 1: Write the failing tests** (`mock_provider "google"`, `mock_provider "google-beta"`, variables: `gateway_id = "llm-a-gemma4-vertex"`, `backend_url = "https://proxy"`, `platforms = ["vertex"]`, `routes = ["/v1/chat/completions"]`, `deadlines = { vertex = 300 }`):
+- [ ] **Step 1: Write the failing tests** (`mock_provider "google"`, `mock_provider "google-beta"`, variables: `gateway_id = "llm-a-gemma4"`, `backend_url = "https://proxy"`, `platforms = ["vertex"]`, `routes = ["/v1/chat/completions"]`, `deadlines = { vertex = 300 }`):
   - `run "paths_per_platform_plus_old"`: `keys(output.openapi.paths) == ["/v1/chat/completions", "/vertex/v1/chat/completions"]`
   - `run "every_operation_calls_backend_with_append"`: every non-`options` operation has `x-google-backend.address == "https://proxy"`, `path_translation == "APPEND_PATH_TO_ADDRESS"`, `deadline == 300`; `!contains(keys(output.openapi), "x-google-backend")`
-  - `run "api_key_and_cors_preflight"`: the 4 asserts of today's `deployments/llm-a-gemma4-12b-vllm-vertex/tests/gateway.tftest.hcl` (`gateway_requires_api_key`), against `output.openapi`
+  - `run "api_key_and_cors_preflight"`: the 4 asserts of today's `deployments/llm-a-gemma4-12b-vllm/tests/gateway.tftest.hcl` (`gateway_requires_api_key`), against `output.openapi`
   - `run "operation_ids_unique"`: the list of all `operationId` values has no duplicates
   - `run "deadline_per_platform"`: with `platforms = ["vertex", "runpod"]` and `deadlines = { vertex = 300, runpod = 1200 }`: `/runpod/...` post deadline is 1200, and the old path has 300 (the default platform)
   - `run "extra_paths_get_prefix_and_own_backend"`: `extra_paths = { "/v1beta/files" = { backend_url = "https://api", methods = ["get"], deadline = 60 } }` gives `/v1beta/files` and `/vertex/v1beta/files`, each with a `get` operation to `https://api`, plus `options`
@@ -139,7 +139,7 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
 | `weights_bucket`, `weights_dir` | `"<project>-models"` and `spec.weights.gcs_dir` when it is set, else null |
 
 - [ ] **Step 1: Write the failing tests** (`mock_provider "google"`), with the LLM-A spec and options from the spec section "Deployment folder after the change" (`platform_options.vertex` only):
-  - `run "same_upload_as_today"`: `output.vertex.model_upload.model.containerSpec.args` contains `"--model=$(AIP_STORAGE_URI)"`, `"--load-format=runai_streamer"` and `"--kv-cache-dtype=fp8"`; `imageUri == "us-central1-docker.pkg.dev/p/dockerhub/vllm/vllm-openai:v0.33.0"`; `predictRoute == "/v1/chat/completions"`; env has `HF_HUB_OFFLINE = "1"`; `output.vertex.name == "llm-a-gemma4-12b-vllm-vertex"`
+  - `run "same_upload_as_today"`: `output.vertex.model_upload.model.containerSpec.args` contains `"--model=$(AIP_STORAGE_URI)"`, `"--load-format=runai_streamer"` and `"--kv-cache-dtype=fp8"`; `imageUri == "us-central1-docker.pkg.dev/p/dockerhub/vllm/vllm-openai:v0.33.0"`; `predictRoute == "/v1/chat/completions"`; env has `HF_HUB_OFFLINE = "1"`; `output.vertex.name == "llm-a-gemma4-12b-vllm"`
   - `run "scale_to_zero"`: `minReplicaCount == 0`, `maxReplicaCount == 1`, `idleScaledownPeriod == "300s"`, `acceleratorType == "NVIDIA_L4"`
   - `run "target_raw_predict"`: `output.target.append_path == false`, `endswith(output.target.url, ":rawPredict")`, `output.target.post_apply == "vertex"`, `output.target.auth == "google"`
   - `run "target_invoke_without_predict_route"`: no `predict_route` in options: `output.target.append_path == true`, `endswith(output.target.url, "/invoke")`
@@ -169,7 +169,7 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
   - `run "rejects_empty"`: `platforms = []`, `expect_failures = [var.platforms]` (Review Focus 5)
   - `run "rejects_duplicates"`: `platforms = ["vertex", "vertex"]`, `expect_failures = [var.platforms]` (Review Focus 5)
   - `run "rejects_unsupported"`: `platforms = ["runpod"]`, `expect_failures = [var.platforms]` (Review Focus 5)
-  - `run "names_unchanged"`: `output.vertex.name == "llm-a-gemma4-12b-vllm-vertex"`, `output.gateway_id == "llm-a-gemma4-vertex"`
+  - `run "names_unchanged"`: `output.vertex.name == "llm-a-gemma4-12b-vllm"`, `output.gateway_id == "llm-a-gemma4"`
 - [ ] **Step 2: Run** `cd infra/modules/model && terraform init -backend=false && terraform test`. Expected: FAIL.
 - [ ] **Step 3: Implement** the facade. `local.targets = merge(contains(var.platforms, "vertex") ? { vertex = module.vertex[0].target } : {})`. Later phases add one entry each.
 - [ ] **Step 4: Run** `terraform test`. Expected: PASS.
@@ -178,18 +178,18 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
 ### Task 6: Move LLM-A to the facade
 
 **Files:**
-- Modify: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf`, `outputs.tf`, `alerts.tf`
-- Delete: `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf`, `cors_proxy.tf`
-- Create: `deployments/llm-a-gemma4-12b-vllm-vertex/moved.tf`
-- Modify: `deployments/llm-a-gemma4-12b-vllm-vertex/tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`
+- Modify: `deployments/llm-a-gemma4-12b-vllm/main.tf`, `outputs.tf`, `alerts.tf`
+- Delete: `deployments/llm-a-gemma4-12b-vllm/gateway.tf`, `cors_proxy.tf`
+- Create: `deployments/llm-a-gemma4-12b-vllm/moved.tf`
+- Modify: `deployments/llm-a-gemma4-12b-vllm/tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`
 
 **Interfaces:**
 - Consumes: the facade (Task 5).
 - Produces: root outputs with the same names as today, so the scripts keep working: `endpoint_id`, `endpoint_dns`, `vertex`, `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `ui` (unchanged value; `base_url` stays the gateway root). New root outputs: `platforms`, `targets`, `gateway_address` (`"module.model.${module.model.gateway_address}"`).
 
-- [ ] **Step 1: Read the current state addresses.** Ask the user to run `cd deployments/llm-a-gemma4-12b-vllm-vertex && direnv exec . terraform state list` (read-only) and paste the list. Do not guess the list.
-- [ ] **Step 2: Change the tests first.** In `tests/gateway.tftest.hcl`: assert on `module.model.openapi`; paths are `["/v1/chat/completions", "/vertex/v1/chat/completions"]`; every post operation calls `module.model` proxy with `APPEND_PATH_TO_ADDRESS`; keep the API key and preflight asserts; SA ID ≤ 30. In `tests/alerts.tftest.hcl`: `module.scale_alerts[0]`. Add `run "outputs_for_scripts"`: `output.gateway_address == "module.model.module.gateway.google_api_gateway_gateway.this"`, `output.platforms == ["vertex"]`, `output.vertex.name == "llm-a-gemma4-12b-vllm-vertex"`.
-- [ ] **Step 3: Run** `cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test`. Expected: FAIL.
+- [ ] **Step 1: Read the current state addresses.** Ask the user to run `cd deployments/llm-a-gemma4-12b-vllm && direnv exec . terraform state list` (read-only) and paste the list. Do not guess the list.
+- [ ] **Step 2: Change the tests first.** In `tests/gateway.tftest.hcl`: assert on `module.model.openapi`; paths are `["/v1/chat/completions", "/vertex/v1/chat/completions"]`; every post operation calls `module.model` proxy with `APPEND_PATH_TO_ADDRESS`; keep the API key and preflight asserts; SA ID ≤ 30. In `tests/alerts.tftest.hcl`: `module.scale_alerts[0]`. Add `run "outputs_for_scripts"`: `output.gateway_address == "module.model.module.gateway.google_api_gateway_gateway.this"`, `output.platforms == ["vertex"]`, `output.vertex.name == "llm-a-gemma4-12b-vllm"`.
+- [ ] **Step 3: Run** `cd deployments/llm-a-gemma4-12b-vllm && terraform init -backend=false && terraform test`. Expected: FAIL.
 - [ ] **Step 4: Rewrite `main.tf`** as the spec section "Deployment folder after the change", with `local.platforms = ["vertex"]`, `gateway_region = var.gateway_region`, no `platform_options.baseten` or `runpod`, and `required_version = ">= 1.11"`. Delete `gateway.tf` and `cors_proxy.tf`. `alerts.tf`: `count = contains(local.platforms, "vertex") ? 1 : 0` and `module.model.vertex_endpoint_id`.
 - [ ] **Step 5: Write `moved.tf`.** One `moved` block per resource from Step 1. The expected map (check it against Step 1):
 
@@ -205,7 +205,7 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
 | `module.scale_alerts` | `module.scale_alerts[0]` |
 
 - [ ] **Step 6: Run** `terraform validate && terraform test`. Expected: PASS. If `validate` rejects a `moved` block, change only that block (for example, move each resource of a module instead of the module) and say why in a comment.
-- [ ] **Step 7: Run** `./scripts/check.py deployments/llm-a-gemma4-12b-vllm-vertex`. Expected: all `ok`.
+- [ ] **Step 7: Run** `./scripts/check.py deployments/llm-a-gemma4-12b-vllm`. Expected: all `ok`.
 - [ ] **Step 8: Commit** `git commit -m "refactor(llm-a): use the model module with platforms = [vertex]"`
 
 ### Task 7: Deploy script and script updates
@@ -236,21 +236,21 @@ Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Ta
 ### Task 8: Docs and the user's plan check
 
 **Files:**
-- Modify: `infra/README.md`, `docs/README.md`, `CLAUDE.md`, `deployments/llm-a-gemma4-12b-vllm-vertex/README.md`
-- Modify where they name `vertex.py` for LLM-A or the LLM-A `gateway.tf`: find them with `grep -rn "vertex.py\|gateway.tf\|cors_proxy.tf" docs infra .claude/skills deployments/llm-a-gemma4-12b-vllm-vertex CLAUDE.md`
+- Modify: `infra/README.md`, `docs/README.md`, `CLAUDE.md`, `deployments/llm-a-gemma4-12b-vllm/README.md`
+- Modify where they name `vertex.py` for LLM-A or the LLM-A `gateway.tf`: find them with `grep -rn "vertex.py\|gateway.tf\|cors_proxy.tf" docs infra .claude/skills deployments/llm-a-gemma4-12b-vllm CLAUDE.md`
 
 - [ ] **Step 1: `infra/README.md`**: add sections "Module: model (platforms)", "Module: platform-vertex", "Module: gateway". Change "Module: cors-proxy" (targets, prefix routing, `secret_env`). Add `scripts/deploy.py` usage with placeholders. Link to the spec.
 - [ ] **Step 2: `docs/README.md`**: the gateway and streaming guide shows the `/vertex/` prefix next to the old path. The scripts guide lists `deploy.py`. Update the Mermaid diagrams with the `diagrams` skill.
 - [ ] **Step 3: `CLAUDE.md`**: the architecture list names `infra/modules/model`, `platform-vertex`, `gateway`, and `scripts/deploy.py`. Keep it short.
-- [ ] **Step 4: LLM-A `README.md`**: deploy with `./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm-vertex`; a test call on `/vertex/v1/chat/completions` next to the old path; the expected result of the first `terraform plan` after this change (Step 6).
+- [ ] **Step 4: LLM-A `README.md`**: deploy with `./scripts/deploy.py deploy deployments/llm-a-gemma4-12b-vllm`; a test call on `/vertex/v1/chat/completions` next to the old path; the expected result of the first `terraform plan` after this change (Step 6).
 - [ ] **Step 5: Run** `./scripts/check.py` and `terraform fmt -recursive -check`. Expected: all `ok`.
-- [ ] **Step 6: Ask the user to run the plan** (the agent does not run it): `cd deployments/llm-a-gemma4-12b-vllm-vertex && direnv exec . terraform init && direnv exec . terraform plan`. Expected:
+- [ ] **Step 6: Ask the user to run the plan** (the agent does not run it): `cd deployments/llm-a-gemma4-12b-vllm && direnv exec . terraform init && direnv exec . terraform plan`. Expected:
   - The 8 moves of Task 6, Step 5.
   - 1 new API config (new paths) and 1 old API config destroyed.
   - In-place updates: the gateway (`api_config`) and the proxy Cloud Run service (env `TARGETS` and `DEFAULT`, new args).
   - **No** replace or destroy of `google_vertex_ai_endpoint`, `google_api_gateway_gateway` or any service account.
   If the plan shows anything else, stop and fix the `moved` blocks before the user applies.
-- [ ] **Step 7: After the user's apply**, ask the user to run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm-vertex` (it does nothing when the gateway still streams), then one test call on the old path and one on `/vertex/v1/chat/completions` (an LLM call starts a GPU replica: about $1.34 per hour).
+- [ ] **Step 7: After the user's apply**, ask the user to run `./scripts/gateway-streaming.py deployments/llm-a-gemma4-12b-vllm` (it does nothing when the gateway still streams), then one test call on the old path and one on `/vertex/v1/chat/completions` (an LLM call starts a GPU replica: about $1.34 per hour).
 - [ ] **Step 8: Commit** `git commit -m "docs: model module, gateway module and deploy.py (multi-platform phase 1)"`
 
 ## Done when (phase 1 of the spec)

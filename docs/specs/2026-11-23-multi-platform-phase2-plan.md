@@ -40,7 +40,7 @@
 | File | Change |
 |---|---|
 | `infra/modules/model/outputs.tf`, `tests/model.tftest.hcl` | New output `ui_platforms` |
-| `deployments/llm-a-gemma4-12b-vllm-vertex/outputs.tf`, `tests/gateway.tftest.hcl` | `ui` output gets `base_url` of the default platform and `platforms`; `features.cold_start` removed |
+| `deployments/llm-a-gemma4-12b-vllm/outputs.tf`, `tests/gateway.tftest.hcl` | `ui` output gets `base_url` of the default platform and `platforms`; `features.cold_start` removed |
 | `ui/src/config.ts`, `ui/src/lib.test.ts` | `Platform` type, `parseModels`, `parseHash`, `choosePlatform`, `withPlatform`, stored choice |
 | `ui/src/api.ts` | `retriesOn429` |
 | `ui/src/components.tsx`, `ui/src/App.tsx`, `ui/src/styles.css` | `PlatformPicker`, header line, hold note |
@@ -54,7 +54,7 @@
 
 **Files:**
 - Modify: `infra/modules/model/outputs.tf`, `infra/modules/model/tests/model.tftest.hcl`
-- Modify: `deployments/llm-a-gemma4-12b-vllm-vertex/outputs.tf` (output `ui`), `deployments/llm-a-gemma4-12b-vllm-vertex/tests/gateway.tftest.hcl` (the run with the `ui` asserts)
+- Modify: `deployments/llm-a-gemma4-12b-vllm/outputs.tf` (output `ui`), `deployments/llm-a-gemma4-12b-vllm/tests/gateway.tftest.hcl` (the run with the `ui` asserts)
 
 **Interfaces:**
 - Consumes: `local.targets` (phase 1; each target has `id`, `label`, `cold_start`), `module.gateway.gateway_url` (`https://<host>`, no trailing slash).
@@ -84,7 +84,7 @@ In the LLM-A test, replace the assert "the ui output stays on the gateway root" 
 
 ```hcl
   assert {
-    condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.id == "llm-a-gemma4-vertex"
+    condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.id == "llm-a-gemma4"
     error_message = "the ui base_url is the default platform path"
   }
   assert {
@@ -95,7 +95,7 @@ In the LLM-A test, replace the assert "the ui output stays on the gateway root" 
 
 - [ ] **Step 2: Run the tests to see them fail**
 
-Run: `cd infra/modules/model && terraform init -backend=false && terraform test` and the same in `deployments/llm-a-gemma4-12b-vllm-vertex`.
+Run: `cd infra/modules/model && terraform init -backend=false && terraform test` and the same in `deployments/llm-a-gemma4-12b-vllm`.
 Expected: FAIL. `ui_platforms` is not declared; the LLM-A `ui` asserts fail.
 
 - [ ] **Step 3: Implement**
@@ -111,7 +111,7 @@ Expected: every line `ok`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add infra/modules/model deployments/llm-a-gemma4-12b-vllm-vertex
+git add infra/modules/model deployments/llm-a-gemma4-12b-vllm
 git commit -m "feat(model): ui_platforms output; LLM-A ui output lists its platforms"
 ```
 
@@ -401,7 +401,7 @@ git commit -m "feat(ui): platform picker per model tab"
 ### Task 7: Docs
 
 **Files:**
-- Modify: `.claude/skills/model-ui/SKILL.md`, `.claude/skills/verify-ui/SKILL.md`, `docs/auth-and-ui.md`, `infra/README.md` (section "Test UI" and "Module: model (platforms)"), `deployments/llm-a-gemma4-12b-vllm-vertex/README.md`, `CLAUDE.md` (the "Test UI" paragraph)
+- Modify: `.claude/skills/model-ui/SKILL.md`, `.claude/skills/verify-ui/SKILL.md`, `docs/auth-and-ui.md`, `infra/README.md` (section "Test UI" and "Module: model (platforms)"), `deployments/llm-a-gemma4-12b-vllm/README.md`, `CLAUDE.md` (the "Test UI" paragraph)
 
 - [ ] **Step 1: Update the docs**
 
@@ -420,7 +420,7 @@ Expected: all pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add .claude/skills docs infra/README.md deployments/llm-a-gemma4-12b-vllm-vertex/README.md CLAUDE.md
+git add .claude/skills docs infra/README.md deployments/llm-a-gemma4-12b-vllm/README.md CLAUDE.md
 git commit -m "docs: UI platform picker (multi-platform phase 2)"
 ```
 
@@ -430,6 +430,6 @@ git commit -m "docs: UI platform picker (multi-platform phase 2)"
 
 Do these after the phase 1 apply. The `/vertex/` paths must answer first.
 
-1. `cd deployments/llm-a-gemma4-12b-vllm-vertex && direnv exec . terraform plan`. Expected: only the `ui` output changes. No resource changes.
+1. `cd deployments/llm-a-gemma4-12b-vllm && direnv exec . terraform plan`. Expected: only the `ui` output changes. No resource changes.
 2. Apply. Then run `./scripts/ui-deploy.py` (a full build, because `ui/` changed).
 3. Open the UI. The LLM-A tab has no picker (1 platform), and the header line shows `Vertex AI`. A chat call goes to `/vertex/v1/chat/completions`. A call starts a GPU replica (about $1.34 per hour).

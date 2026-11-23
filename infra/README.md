@@ -218,7 +218,7 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
 9. Add the `ui` output and run `./scripts/ui-deploy.py`. Follow the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
-Vertex AI deployments: use the [model module](#module-model-platforms). It makes the CORS proxy and the gateway, so steps 3 to 6 are not necessary. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/`. The rest of this section is for LLM-B, which still calls `vertex-model` directly.
+Vertex AI deployments: use the [model module](#module-model-platforms). It makes the CORS proxy and the gateway, so steps 3 to 6 are not necessary. Example: `deployments/llm-a-gemma4-12b-vllm/`. The rest of this section is for LLM-B, which still calls `vertex-model` directly.
 
 Older Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with 1 target `vertex`: the `:rawPredict` URL of the endpoint, `append_path = false`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/llm-b-qwen35-9b-fastapi/gateway.tf` and `cors_proxy.tf`.
 
@@ -422,7 +422,7 @@ module "model" {
 
   project_id            = var.project_id
   region                = var.region
-  name                  = "llm-a-gemma4-12b-vllm-vertex"
+  name                  = "llm-a-gemma4-12b-vllm"
   image                 = "us-central1-docker.pkg.dev/${var.project_id}/dockerhub/vllm/vllm-openai:v0.33.0"
   args                  = ["--model=$(AIP_STORAGE_URI)", "--load-format=runai_streamer", "--host=0.0.0.0", "--port=8080"]
   predict_route         = "/v1/chat/completions"
@@ -472,7 +472,7 @@ Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every pla
 
 `platform_options.<id>` holds the options of 1 platform. A flag that depends on the platform or the GPU goes into `platform_options.<id>.extra_args`. The adapter appends it to `spec.args`. `platform_options.<id>.name` overrides `name` for 1 platform.
 
-Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`, `vertex_service_account_email`, `proxy_url`, `gateway_service_account_email`, `runpod_volumes` (for `scripts/runpod-weights.py`), `runpod_args`, `runpod_env` and `proxy_extra_invoker_count` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf` and `outputs.tf`.
+Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`, `vertex_service_account_email`, `proxy_url`, `gateway_service_account_email`, `runpod_volumes` (for `scripts/runpod-weights.py`), `runpod_args`, `runpod_env` and `proxy_extra_invoker_count` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm/main.tf` and `outputs.tf`.
 
 After apply, run the post-apply step of each platform:
 
@@ -645,7 +645,7 @@ Each filter is `<resource_filter> AND (textPayload:"<text>" OR jsonPayload.messa
 | Deployment | Ready line | Why this line |
 |---|---|---|
 | `tts-a-kokoro-cpu` | `STARTUP HTTP probe succeeded` (Cloud Run system log) | Uvicorn logs `Application startup complete.` before the probe passes |
-| `llm-a-gemma4-12b-vllm-vertex` | `Application startup complete.` | vLLM loads the model before it starts uvicorn |
+| `llm-a-gemma4-12b-vllm` | `Application startup complete.` | vLLM loads the model before it starts uvicorn |
 | `llm-b-qwen35-9b-fastapi` | `engine ready` | `image/app.py` prints it after the engine loads. Uvicorn starts first |
 | `stt-a-qwen3-asr-diar` | `models ready` | `services/speech_engine/speech_engine/main.py` prints it after the 3 models load. Uvicorn starts first |
 
@@ -655,7 +655,7 @@ Each filter is `<resource_filter> AND (textPayload:"<text>" OR jsonPayload.messa
 
 Every deployment must have scale alerts. `./scripts/check.py` fails for a root in `deployments/` that does not call the module `scale-alerts`.
 
-1. Copy `alerts.tf` from a deployment on the same platform: `deployments/tts-a-kokoro-cpu/` (Cloud Run) or `deployments/llm-a-gemma4-12b-vllm-vertex/` (Vertex AI).
+1. Copy `alerts.tf` from a deployment on the same platform: `deployments/tts-a-kokoro-cpu/` (Cloud Run) or `deployments/llm-a-gemma4-12b-vllm/` (Vertex AI).
 2. Change `title`. It is the model name in the Slack message.
 3. Keep `resource_filter`. It uses `module.service.service_name` (Cloud Run) or `module.model.endpoint_id` (Vertex AI), so it matches only this model.
 4. Set `ready_text` to the log line that the server writes after the model is loaded. Do not use a line from the container start:
@@ -686,7 +686,7 @@ cd infra/modules/vertex-model && terraform init -backend=false && terraform test
 cd infra/modules/cors-proxy && terraform init -backend=false && terraform test               # CORS proxy module
 cd infra/modules/scale-alerts && terraform init -backend=false && terraform test             # scale alerts module
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
-cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
+cd deployments/llm-a-gemma4-12b-vllm && terraform init -backend=false && terraform test   # Vertex gateway spec
 cd deployments/llm-b-qwen35-9b-fastapi && terraform init -backend=false && terraform test       # custom container upload spec
 cd deployments/stt-a-qwen3-asr-diar && terraform init -backend=false && terraform test   # STT-A: facade (Vertex AI, Runpod), gateway paths, STT API service
 ```
