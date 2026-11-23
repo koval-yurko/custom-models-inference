@@ -27,3 +27,8 @@ output "predict_bindings" {
   description = "Number of roles/aiplatform.user bindings: 1 when a target uses auth = google, else 0 (for tests)."
   value       = length(google_project_iam_member.predict)
 }
+
+output "extra_invoker_count" {
+  description = "Number of extra invokers (for tests)."
+  value       = length(google_cloud_run_v2_service_iam_member.extra_invoker)
+}

@@ -1,12 +1,10 @@
-# tflint-ignore: terraform_unused_declarations
 variable "project_id" {
-  description = "GCP project ID. Unused here: every adapter has the same inputs."
+  description = "GCP project ID. The URL of an own image (Artifact Registry repo models) uses it."
   type        = string
 }
 
-# tflint-ignore: terraform_unused_declarations
 variable "region" {
-  description = "GCP region. Unused here: every adapter has the same inputs."
+  description = "GCP region of the Artifact Registry repo models (own images)."
   type        = string
 }
 
@@ -21,7 +19,7 @@ variable "spec" {
 }
 
 variable "options" {
-  description = "Runpod options: name, gpu_pools, excluded_types, scaling_value, disk_gb, extra_args, env, hf_token_secret. See infra/README.md, \"Module: platform-runpod\"."
+  description = "Runpod options: name, gpu_pools, excluded_types, scaling_value, disk_gb, extra_args, env, hf_token_secret, volume ({ data_centers, size_gb, type }), registry. See infra/README.md, \"Module: platform-runpod\"."
   type        = any
   default     = {}
 }

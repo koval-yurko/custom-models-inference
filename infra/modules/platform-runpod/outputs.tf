@@ -21,3 +21,17 @@ output "args" {
   description = "The args string of the template (for tests)."
   value       = runpod_template.this.args
 }
+
+output "volumes" {
+  description = "The network volumes of the weights: { dir, volumes = [{ id, data_center }] } (scripts/runpod-weights.py fills each). null without options.volume."
+  value = local.volume != null ? {
+    dir     = local.gcs_dir
+    volumes = [for dc in sort(tolist(local.volume_dcs)) : { id = runpod_network_volume.this[dc].id, data_center = dc }]
+  } : null
+}
+
+output "env" {
+  description = "The env of the template (for tests)."
+  value       = local.env
+}
+

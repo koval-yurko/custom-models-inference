@@ -35,6 +35,8 @@ Contents:
 - One API Gateway API for each entry in `local.gateway_apis` (`gateways.tf`), and a placeholder API config. A managed service can be enabled only after its API has a config, so the placeholder comes first, then the enabled service, then the key. No gateway uses the placeholder.
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
 - The Slack notification channel `models-slack` (`notifications.tf`). The deployments send their scale messages to it. See [Scale notifications (Slack)](#scale-notifications-slack).
+- The secrets `runpod-s3-access-key` and `runpod-s3-secret-key` (`runpod_s3.tf`, write-only from `RUNPOD_S3_*` in `.env`). Only the Cloud Build service account may read them: `scripts/runpod-weights.py --cloud` uses them.
+- The Runpod registry credential `gcp-models` (`runpod_registry.tf`): a service account `runpod-pull` with `roles/artifactregistry.reader` on the repo `models` only, its JSON key, and a `runpod_registry` with the username `_json_key`. Runpod pulls own images (STT-A) with it. The key is in the state of `infra/core` (sensitive, read-only). To rotate it, run `terraform apply -replace=google_service_account_key.runpod_pull`.
 - The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
 All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to change it.
@@ -46,6 +48,8 @@ All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to chan
 | `gateways.tf` | Gateway APIs and the shared API key |
 | `ui.tf` | Public bucket of the test UI |
 | `notifications.tf` | Slack notification channel `models-slack` |
+| `runpod_registry.tf` | Runpod pull credential for the repo `models` |
+| `runpod_s3.tf` | Runpod S3 API key secrets for the cloud weights copy |
 
 ## First setup
 
@@ -214,9 +218,9 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
 9. Add the `ui` output and run `./scripts/ui-deploy.py`. Follow the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
-Vertex AI deployments: use the [model module](#module-model-platforms). It makes the CORS proxy and the gateway, so steps 3 to 6 are not necessary. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/`. The rest of this section is for LLM-B and STT-A, which still call `vertex-model` directly.
+Vertex AI deployments: use the [model module](#module-model-platforms). It makes the CORS proxy and the gateway, so steps 3 to 6 are not necessary. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/`. The rest of this section is for LLM-B, which still calls `vertex-model` directly.
 
-Older Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with 1 target `vertex`: the `:rawPredict` URL of the endpoint, `append_path = false`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/stt-a-qwen3-asr-diar-vertex/gateway.tf` and `cors_proxy.tf`.
+Older Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with 1 target `vertex`: the `:rawPredict` URL of the endpoint, `append_path = false`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/llm-b-qwen35-9b-fastapi/gateway.tf` and `cors_proxy.tf`.
 
 For an endpoint with `invoke_routes = true`, set the target `url` to the `:invoke` base, which ends in `/invoke`, with `append_path = true`. Use `path_translation = "APPEND_PATH_TO_ADDRESS"`. The proxy then adds the request path, for example `/extract` goes to `<base>/invoke/extract`. List each route as its own gateway path. See `deployments/llm-b-qwen35-9b-fastapi/`.
 
@@ -443,15 +447,15 @@ The first deployment card (LLM-A on Vertex AI) checks these:
 
 ## Module: model (platforms)
 
-`modules/model/` deploys 1 model spec to a list of platforms. It is the target layout of all Vertex AI deployments. LLM-A uses it. LLM-B and STT-A still use `vertex-model` directly (phase 6 moves them). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
+`modules/model/` deploys 1 model spec to a list of platforms. It is the target layout of all Vertex AI deployments. LLM-A and STT-A use it. LLM-B still uses `vertex-model` directly (phase 6 moves it). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
 
 One call creates:
 
 - 1 adapter per platform in `platforms`: `vertex` ([Module: platform-vertex](#module-platform-vertex)) and `runpod` ([Module: platform-runpod](#module-platform-runpod)). Baseten is deferred, because the Baseten account cannot deploy custom models; see the spec (Status). The module rejects other ids, an empty list and a duplicated id at plan.
 - 1 CORS proxy `<gateway_id>-proxy` with 1 target per platform. The first platform is the default for the old paths. For each platform with a key (`auth` is not `google`), the module gives the proxy the env var `<AUTH>_API_KEY` from the `infra/core` secret `<auth>-api-key` (for Runpod: `RUNPOD_API_KEY` from `runpod-api-key`). The proxy timeout is the largest deadline of the targets.
-- 1 API Gateway ([Module: gateway](#module-gateway)) with the old paths plus 1 path per platform: `/<platform><route>`.
+- 1 API Gateway ([Module: gateway](#module-gateway)) with the old paths plus 1 path per platform: `/<platform><route>`. `extra_paths` go to their own backend (STT-A: the `stt_api` service) with the same prefix rule.
 
-Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every platform), `gateway_id` (the API in `infra/core/gateways.tf`), `platforms`, `spec`, `platform_options`.
+Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every platform), `gateway_id` (the API in `infra/core/gateways.tf`), `platforms`, `spec`, `platform_options`, `extra_paths` (default `{}`), `proxy_invokers` (more service accounts that may call the proxy, default `[]`; STT-A: the `stt_api` SA).
 
 `spec` is platform-neutral:
 
@@ -464,11 +468,11 @@ Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every pla
 | `routes` | Gateway paths of the model, for example `["/v1/chat/completions"]` |
 | `gpu` | `"L4"`, or null for CPU |
 | `max_replicas`, `idle_seconds` | Default 1 and 300. Min replicas is always 0 |
-| `weights` | `{ hf_repo, revision, gcs_dir }`. `gcs_dir` is the `TARGET_DIR` of the weights-copy job. `revision` (a commit sha) is required on Runpod, so all platforms load the same weights |
+| `weights` | `{ hf_repo, revision, gcs_dir }`. `gcs_dir` is the `TARGET_DIR` of the weights-copy job. On Runpod without a volume, `revision` (a commit sha) is required, so all platforms load the same weights. With a Runpod volume, `gcs_dir` is required instead |
 
 `platform_options.<id>` holds the options of 1 platform. A flag that depends on the platform or the GPU goes into `platform_options.<id>.extra_args`. The adapter appends it to `spec.args`. `platform_options.<id>.name` overrides `name` for 1 platform.
 
-Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`, `runpod_args` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf` and `outputs.tf`.
+Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`, `vertex_service_account_email`, `proxy_url`, `gateway_service_account_email`, `runpod_volumes` (for `scripts/runpod-weights.py`), `runpod_args`, `runpod_env` and `proxy_extra_invoker_count` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf` and `outputs.tf`.
 
 After apply, run the post-apply step of each platform:
 
@@ -487,7 +491,7 @@ After apply, run the post-apply step of each platform:
 
 - Image: `stock` becomes `<region>-docker.pkg.dev/<project>/dockerhub/<image>` (`library/` is added for an image without a namespace). `own` becomes `<region>-docker.pkg.dev/<project>/models/<own>`.
 - Args: `spec.args` plus `options.extra_args`. `{model}` becomes `$(AIP_STORAGE_URI)`.
-- Env: `spec.env`, then `HF_HUB_OFFLINE = "1"`, then `options.env`.
+- Env: `spec.env`, then `HF_HUB_OFFLINE = "1"`, then `SETUP_PLATFORM = "vertex"` (own images only, the container contract), then `options.env`.
 - `gpu = "L4"` becomes `NVIDIA_L4`. Another value fails at plan.
 - Options: `name`, `machine_type` (default `g2-standard-8`), `shared_memory_size_mb`, `deployment_timeout` (default `1800s`), `extra_args`, `env`, `predict_route`. With `predict_route`, the target is the fixed `:rawPredict` URL. Without it, the upload uses invoke routes and the target is the `:invoke` base.
 
@@ -497,21 +501,35 @@ Output `target`: `{ id = "vertex", label = "Vertex AI", url, append_path, auth =
 
 `modules/platform-runpod/` is the Runpod adapter. It creates 1 `runpod_template` (serverless) and 1 `runpod_serverless_endpoint` of type `LOAD_BALANCER`. Provider: `runpod/runpod ~> 2.0`. It reads `RUNPOD_API_KEY` from the env (see [Runpod setup (once)](#runpod-setup-once)).
 
-- Image: `stock` only, from Docker Hub. An `own` image fails at plan (phase 6 adds registry access).
-- Args: `spec.args`, then `options.extra_args`, then `--revision=<spec.weights.revision>`. `{model}` becomes `spec.weights.hf_repo`: vLLM downloads the weights from Hugging Face at each cold start. Runpod takes the args as 1 string, so an arg with a space fails at plan.
-- Env: `spec.env`, then `HF_HUB_OFFLINE = "0"`, `PORT` and `PORT_HEALTH` (= `spec.port`), `HEALTH_CHECK_PATH` (= `spec.health_route`), then `options.env`. The load balancer sends traffic to a worker only after the health path answers 200.
+- Image: `stock` from Docker Hub, or `own` from `<region>-docker.pkg.dev/<project>/models/<own>`. An own image uses the registry credential named `options.registry` (default `gcp-models`, made by `infra/core`). The child module `registry/` finds its ID by name. Without the credential, the plan fails ("apply infra/core first").
+- Weights without `options.volume`: `{model}` becomes `spec.weights.hf_repo`, and the adapter adds `--revision=<spec.weights.revision>`. vLLM downloads the weights from Hugging Face at each cold start.
+- Weights with `options.volume = { data_centers, size_gb = 20, type = "STANDARD" }`: the adapter makes 1 `runpod_network_volume` per data center. The endpoint mounts them (`network_volumes`, sorted by ID: Runpod returns that order) and runs only in their data centers (`data_center_ids`). A worker uses the volume of its data center. Use several data centers: 24 GB GPUs are often out of stock in 1 (the worker then stays THROTTLED). `{model}` and env `MODEL` become `/runpod-volume/<spec.weights.gcs_dir>`, and `HF_HUB_OFFLINE = "1"`. `scripts/runpod-weights.py` fills the volume from GCS (see [Copy weights to a Runpod volume](#copy-weights-to-a-runpod-volume)). The volume can grow, never shrink. A destroy deletes it and its data.
+- Args: `spec.args`, then `options.extra_args`, then the revision flag (without a volume only). Runpod takes the args as 1 string, so an arg with a space fails at plan.
+- Env: `spec.env`, then `HF_HUB_OFFLINE`, `PORT` and `PORT_HEALTH` (= `spec.port`), `HEALTH_CHECK_PATH` (= `spec.health_route`), then `SETUP_PLATFORM = "runpod"` (own images only) and `MODEL` (with a volume), then `options.env`. The contract env is not set for stock images: a new env value would replace the endpoint of LLM-A. The load balancer sends traffic to a worker only after the health path answers 200.
 - Runpod copies the template into the endpoint only when it creates the endpoint. So a change of the image, the args or the env replaces the endpoint (`replace_triggered_by`). The endpoint URL changes, and the proxy gets the new URL in the same apply.
 - Scale: `workers_min = 0`, `workers_max = spec.max_replicas`, `idle_timeout = spec.idle_seconds`, `scaling_type = "REQUEST_COUNT"`, `flashboot = "FLASHBOOT"`, 1 GPU per worker. `spec.gpu = null` (CPU) fails at plan.
-- Options: `name`, `gpu_pools` (default `["AMPERE_24"]`: L4, A5000 or 3090), `excluded_types` (default none), `scaling_value` (default 4 requests at the same time), `disk_gb` (default 60), `extra_args`, `env`, `hf_token_secret`. Any cloud type and any data center. The flags must work on every GPU type in the pools: `AMPERE_24` has no native FP8.
+- Options: `name`, `gpu_pools` (default `["AMPERE_24"]`: L4, A5000 or 3090), `excluded_types` (default none), `scaling_value` (default 4 requests at the same time), `disk_gb` (default 60), `extra_args`, `env`, `hf_token_secret`, `volume`, `registry`. Any cloud type. Any data center without a volume. The flags must work on every GPU type in the pools: `AMPERE_24` has no native FP8.
 - `hf_token_secret = "<name>"` adds `HF_TOKEN = "{{ RUNPOD_SECRET_<name> }}"` for a gated repo. Make the secret in the Runpod console first. Not verified on Serverless.
 
-Output `target`: `{ id = "runpod", label = "Runpod", url = request_urls.base, append_path = true, auth = "runpod", cold_start = "retry-429", deadline = 300, post_apply = null }`. The endpoint is ready after apply: `scripts/deploy.py` has nothing to do for it. Also `endpoint_id` and `args`.
+Output `target`: `{ id = "runpod", label = "Runpod", url = request_urls.base, append_path = true, auth = "runpod", cold_start = "retry-429", deadline = 300, post_apply = null }`. The endpoint is ready after apply: `scripts/deploy.py` has nothing to do for it. Also `endpoint_id`, `volumes` (`{ dir, volumes = [{ id, data_center }] }` or null), `args` and `env`.
+
+### Copy weights to a Runpod volume
+
+A deployment with `platform_options.runpod.volume` needs its weights on the volume before the first Runpod call. `scripts/runpod-weights.py` copies the GCS folder `spec.weights.gcs_dir` (made by the `weights-copy` job) to the volume through the Runpod S3 API. Each part (16 MiB) is 1 GCS range read and 1 S3 upload, with 5 tries (uploads through the Cloudflare front of the S3 API break often). Nothing goes to the local disk. A file with the same size on the volume is skipped. The script never deletes.
+
+1. Make a Runpod S3 API key (console, Settings, "S3 API keys"). It is not the Runpod API key. Put it in `.env` as `RUNPOD_S3_ACCESS_KEY` and `RUNPOD_S3_SECRET_KEY`. Only this script uses it.
+2. The data center of the volume must have the S3 API: see the list in the [Runpod S3 API docs](https://docs.runpod.io/serverless/storage/s3-api).
+3. After apply (the root needs the outputs `runpod_volumes` and `weights_gcs`). The script fills every volume. `--cloud` runs the copy in a Cloud Build job (1 step per volume, at the same time), which needs the `infra/core` secrets `runpod-s3-access-key` and `runpod-s3-secret-key`. Use it when your upload is slow:
+   ```sh
+   ./scripts/runpod-weights.py deployments/<name> --dry-run
+   ./scripts/runpod-weights.py deployments/<name> --cloud   # or without --cloud: from this computer
+   ```
 
 ### Runpod setup (once)
 
 1. Make a Runpod account and add credit. Defaults: at most 5 workers over all endpoints, and a spend limit of $80 per hour.
 2. Make an API key (console, Settings, API Keys). Put it in `.env` as `RUNPOD_API_KEY`.
-3. Run `./scripts/hcp-sync.py --dry-run`, then `./scripts/hcp-sync.py`. Every HCP workspace gets `RUNPOD_API_KEY` as a sensitive env var. A root that declares the `runpod` provider (today only LLM-A) fails at plan without the key. `infra/core` needs the key too, because its variable `runpod_api_key` has no default.
+3. Run `./scripts/hcp-sync.py --dry-run`, then `./scripts/hcp-sync.py`. Every HCP workspace gets `RUNPOD_API_KEY` as a sensitive env var. A root that declares the `runpod` provider (LLM-A, STT-A, `infra/core`) fails at plan without the key. `infra/core` needs the key too, because its variable `runpod_api_key` has no default.
 4. Apply `infra/core`. It writes the key to the secret `runpod-api-key` (write-only, not in state). To rotate the key: change `.env`, run `hcp-sync.py`, and raise `secret_data_wo_version` in `infra/core/provider_keys.tf`.
 5. Gated Hugging Face repos only: make a Runpod secret with the Hugging Face token (console, Secrets) and set `platform_options.runpod.hf_token_secret`.
 
@@ -520,10 +538,11 @@ Output `target`: `{ id = "runpod", label = "Runpod", url = request_urls.base, ap
 `modules/gateway/` makes the gateway SA `<gateway_id>-gw`, the API config and the gateway, as the `gateway.tf` files of the older deployments do.
 
 - Paths: for each route `r`, the old path `r` and 1 path `/<platform>r` per platform. `extra_paths` (path to `{ backend_url, methods, deadline }`, for a second backend) get the same rule.
+- Path parameters: each `{name}` in a path becomes a required path parameter on every operation of the path (STT-A `/v1beta/files/{id}`). A path without one has no `parameters` key.
 - Each operation has its own `x-google-backend` with `path_translation = "APPEND_PATH_TO_ADDRESS"` and the deadline of its platform (`deadlines`). The old paths use the deadline of the first platform. There is no top-level `x-google-backend`: API Gateway ignores it on a path.
 - Every path needs the API key, except the `options` operation (CORS preflight).
 - Inputs: `project_id`, `region` (gateway region), `gateway_id` (max 27 chars), `backend_url`, `platforms`, `routes`, `methods` (default `["post"]`), `deadlines`, `extra_paths`. Outputs: `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `service_account_email`, `address`, `openapi`.
-- `scripts/gateway-streaming.py` reads the root output `gateway_address` to import the gateway. A root without it (TTS-A, LLM-B, STT-A) uses `google_api_gateway_gateway.this`.
+- `scripts/gateway-streaming.py` reads the root output `gateway_address` to import the gateway. A root without it (TTS-A, LLM-B) uses `google_api_gateway_gateway.this`.
 
 ## Test UI
 
@@ -560,11 +579,11 @@ Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS heade
 - Targets: the input `targets` maps a platform id to `{ url, append_path, auth }`. The first path segment picks the target: `/vertex/v1/chat/completions` goes to `vertex` with the path `/v1/chat/completions`. A path without a known platform segment (the old paths, for example `/v1/chat/completions`) goes to `default_platform` with the full path. The query string stays.
 - `append_path = true`: the proxy appends the path to `url` (Vertex AI `:invoke` base). `append_path = false`: `url` is one fixed URL (Vertex AI `:rawPredict`).
 - `auth = "google"`: the proxy sends its own access token. `runpod`: the proxy sends `Authorization: Bearer <key>` with the key from `RUNPOD_API_KEY`. These come from Secret Manager through the input `secret_env` (env name to secret ID). A missing key gives HTTP 502 with CORS headers.
-- Cold start on Runpod: at 0 workers Runpod answers "no workers available". `cold_answer` in `cors_proxy.py` changes that answer to 429 with `Retry-After: 30`, so the UI retries as for Vertex AI. The proxy writes the raw answer to its log (`runpod cold: <status> <body>`). Other error answers keep their status. Good answers stream as before.
-- It scales to zero (max 2 instances). Only the gateway SA has `roles/run.invoker`. The proxy SA has `roles/aiplatform.user` only when a target has `auth = "google"` (on the project: the provider has no IAM resource for 1 endpoint).
-- Inputs: `project_id`, `region`, `name`, `image`, `targets`, `default_platform`, `secret_env` (default `{}`), `timeout` (default `"300s"`), `gateway_service_account_email`. Outputs: `url`, `service_name`, `service_account_email`, `env`, `secret_env`, `predict_bindings` (the last 3 for tests).
+- Cold start on Runpod: at 0 workers Runpod holds the request until a worker is up. For a target with a key, the proxy waits `COLD_WAIT` seconds (env, default 280, below the 300 s gateway deadline) for the answer headers. Then it answers 429 with `Retry-After: 30`, so the UI and the STT-A `stt_api` retry as for Vertex AI. The held request still starts the worker. Exception: when the target answered in the last `WARM_SECONDS` (env, default 300, the idle time), a worker is up and the request is only slow, so the proxy answers 504 (a retry would run the long request again). This memory is per proxy instance. After the headers, the body may take up to `TIMEOUT`. A "no workers available" answer also becomes 429 (`cold_answer`).
+- It scales to zero (max 2 instances). The gateway SA has `roles/run.invoker`, and the service accounts in `extra_invokers` (STT-A: `stt_api`). The proxy SA has `roles/aiplatform.user` only when a target has `auth = "google"` (on the project: the provider has no IAM resource for 1 endpoint).
+- Inputs: `project_id`, `region`, `name`, `image`, `targets`, `default_platform`, `secret_env` (default `{}`), `timeout` (default `"300s"`), `gateway_service_account_email`, `extra_invokers` (default `[]`). Outputs: `url`, `service_name`, `service_account_email`, `env`, `secret_env`, `predict_bindings`, `extra_invoker_count` (the last 4 for tests).
 - The gateway must use `path_translation = "APPEND_PATH_TO_ADDRESS"`, so the proxy sees the path.
-- A deployment on [Module: model (platforms)](#module-model-platforms) gets the proxy from the module. LLM-B and STT-A still call it in their `cors_proxy.tf` with 1 target `vertex`.
+- A deployment on [Module: model (platforms)](#module-model-platforms) gets the proxy from the module. LLM-B still calls it in its `cors_proxy.tf` with 1 target `vertex`.
 - Python unit tests: `infra/modules/cors-proxy/tests/test_cors_proxy.py`. `./scripts/check.py` runs them.
 - Kokoro answers CORS itself, so the TTS gateway does not use it.
 - Check: `curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.googleapis.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"`. The answer must be 204 or 200 with `access-control-allow-origin`.
@@ -628,7 +647,7 @@ Each filter is `<resource_filter> AND (textPayload:"<text>" OR jsonPayload.messa
 | `tts-a-kokoro-cpu` | `STARTUP HTTP probe succeeded` (Cloud Run system log) | Uvicorn logs `Application startup complete.` before the probe passes |
 | `llm-a-gemma4-12b-vllm-vertex` | `Application startup complete.` | vLLM loads the model before it starts uvicorn |
 | `llm-b-qwen35-9b-fastapi` | `engine ready` | `image/app.py` prints it after the engine loads. Uvicorn starts first |
-| `stt-a-qwen3-asr-diar-vertex` | `models ready` | `services/speech_engine/speech_engine/main.py` prints it after the 3 models load. Uvicorn starts first |
+| `stt-a-qwen3-asr-diar` | `models ready` | `services/speech_engine/speech_engine/main.py` prints it after the 3 models load. Uvicorn starts first |
 
 `scripts/vertex.py` uses the Vertex AI v1beta1 API. There, container logs are off by default, and `disableContainerLogging = false` has no effect. The `vertex-model` module sets `enableContainerLogging = true`. A model deployed before 2026-11-20 has no container logs: deploy it again once.
 
@@ -669,7 +688,7 @@ cd infra/modules/scale-alerts && terraform init -backend=false && terraform test
 cd deployments/tts-a-kokoro-cpu && terraform init -backend=false && terraform test           # gateway spec
 cd deployments/llm-a-gemma4-12b-vllm-vertex && terraform init -backend=false && terraform test   # Vertex gateway spec
 cd deployments/llm-b-qwen35-9b-fastapi && terraform init -backend=false && terraform test       # custom container upload spec
-cd deployments/stt-a-qwen3-asr-diar-vertex && terraform init -backend=false && terraform test   # STT-A: rawPredict, gateway paths, STT API service
+cd deployments/stt-a-qwen3-asr-diar && terraform init -backend=false && terraform test   # STT-A: facade (Vertex AI, Runpod), gateway paths, STT API service
 ```
 
 The test UI has its own unit tests: `cd ui && npm install && npm test`.

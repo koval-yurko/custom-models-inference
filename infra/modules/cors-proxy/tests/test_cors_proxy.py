@@ -70,7 +70,7 @@ class Handler(unittest.TestCase):
     def test_missing_key_gives_502_with_cors(self):
         import http.client, threading
         from http.server import ThreadingHTTPServer
-        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT = T, "vertex", 5
+        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT, cp.COLD_WAIT, cp.WARM_SECONDS = T, "vertex", 5, 1, 300
         srv = ThreadingHTTPServer(("127.0.0.1", 0), cp.H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
@@ -85,7 +85,8 @@ class Handler(unittest.TestCase):
 
 
 class FakeUpstream:
-    """Stands in for http.client.HTTPSConnection: answers with a fixed status, headers and body."""
+    """Stands in for http.client.HTTPSConnection: answers with a fixed status, headers and body.
+    answer = None: no answer headers in time (getresponse raises TimeoutError, as a socket timeout does)."""
     answer = (200, [("Content-Type", "text/event-stream")], b"data: 1\n\n")
 
     def __init__(self, *a, **k):
@@ -96,6 +97,8 @@ class FakeUpstream:
 
     def getresponse(self):
         import io
+        if self.answer is None:
+            raise TimeoutError("timed out")
         status, headers, body = self.answer
         r = io.BufferedReader(io.BytesIO(body))
         r.status, r.getheaders = status, lambda: headers
@@ -110,7 +113,7 @@ class Mapping(unittest.TestCase):
         import http.client, os, threading
         from http.server import ThreadingHTTPServer
         from unittest import mock
-        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT = T, "vertex", 5
+        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT, cp.COLD_WAIT, cp.WARM_SECONDS = T, "vertex", 5, 1, 300
         FakeUpstream.answer = answer
         srv = ThreadingHTTPServer(("127.0.0.1", 0), cp.H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -131,6 +134,27 @@ class Mapping(unittest.TestCase):
     def test_other_error_keeps_status_and_body(self):
         status, retry, _, body = self.call((500, [("Content-Type", "application/json")], b'{"error":"boom"}'))
         self.assertEqual((status, retry, body), (500, None, b'{"error":"boom"}'))
+
+    def test_no_answer_in_cold_wait_becomes_429(self):
+        cp._ok.clear()
+        status, retry, cors, body = self.call(None)
+        self.assertEqual((status, retry, cors), (429, "30", "*"))
+        self.assertIn(b"is starting", body)
+
+    def test_no_answer_after_a_recent_answer_is_504(self):
+        import time
+        cp._ok["runpod"] = time.time()  # a worker answered just now: the request is slow, a retry would repeat it
+        status, retry, cors, _ = self.call(None)
+        self.assertEqual((status, retry, cors), (504, None, "*"))
+
+    def test_good_answer_marks_the_target_warm(self):
+        cp._ok.clear()
+        self.call((200, [("Content-Type", "application/json")], b"{}"))
+        self.assertIn("runpod", cp._ok)
+
+    def test_wait_answer(self):
+        self.assertEqual(cp.wait_answer("runpod", 0.0, 1000.0, 280, 300)[0], 429)
+        self.assertEqual(cp.wait_answer("runpod", 800.0, 1000.0, 280, 300)[0], 504)
 
     def test_good_answer_streams_through(self):
         status, _, cors, body = self.call((200, [("Content-Type", "text/event-stream")], b"data: 1\n\ndata: 2\n\n"))

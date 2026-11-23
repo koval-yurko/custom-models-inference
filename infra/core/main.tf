@@ -21,7 +21,7 @@ locals {
     "cloudquotas.googleapis.com",
     # Slack notification channel and the scale alerts of the deployments.
     "monitoring.googleapis.com",
-    # signBlob for the signed upload URLs of STT-A (deployments/stt-a-qwen3-asr-diar-vertex/services/stt_api)
+    # signBlob for the signed upload URLs of STT-A (deployments/stt-a-qwen3-asr-diar/services/stt_api)
     "iamcredentials.googleapis.com",
     # Cloud Scheduler starts the scale-watch job every minute (scale_watch.tf)
     "cloudscheduler.googleapis.com",

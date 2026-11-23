@@ -44,6 +44,7 @@ module "cors_proxy" {
   secret_env                    = { for a in distinct([for t in values(local.targets) : t.auth if t.auth != "google"]) : "${upper(a)}_API_KEY" => "${a}-api-key" }
   timeout                       = "${max([for t in values(local.targets) : t.deadline]...)}s"
   gateway_service_account_email = module.gateway.service_account_email
+  extra_invokers                = var.proxy_invokers
 }
 
 module "gateway" {
@@ -56,4 +57,5 @@ module "gateway" {
   platforms   = var.platforms
   routes      = var.spec.routes
   deadlines   = { for p, t in local.targets : p => t.deadline }
+  extra_paths = var.extra_paths
 }

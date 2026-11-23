@@ -1,0 +1,23 @@
+# Build the STT-A image and push it to the infra/core "models" repo. Run from the repo root:
+#   gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
+#     --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
+#     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.4
+# _TAG must match var.image_tag in ../../variables.tf.
+substitutions:
+  _REGION: us-central1
+  _TAG: 0.1.4
+  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/models/stt-a-qwen3-asr-diar:${_TAG}
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_IMAGE}", "."]
+
+images: ["${_IMAGE}"]
+
+options:
+  dynamicSubstitutions: true
+  # The base image is about 10 GB unpacked. The default 100 GB disk is enough; a bigger machine pulls and pushes faster.
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 3600s

@@ -71,3 +71,20 @@ variable "platform_options" {
   type        = any
   default     = {}
 }
+
+variable "extra_paths" {
+  description = "Gateway paths to another backend (STT-A stt_api): path -> {backend_url, methods, deadline}. Each also gets /<platform><path>."
+  type = map(object({
+    backend_url = string
+    methods     = list(string)
+    deadline    = number
+  }))
+  default = {}
+}
+
+variable "proxy_invokers" {
+  description = "More service accounts that may call the CORS proxy (STT-A stt_api calls the GPU through it)."
+  type        = list(string)
+  default     = []
+}
+

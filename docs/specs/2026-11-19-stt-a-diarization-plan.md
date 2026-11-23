@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Folder `deployments/stt-a-qwen3-asr-diar-vertex/`. Gateway ID `stt-a-qwen3-asr-diar`. Image `${var.region}-docker.pkg.dev/${var.project_id}/models/stt-a-qwen3-asr-diar:${var.image_tag}`, default tag `0.1.0`.
+- Folder `deployments/stt-a-qwen3-asr-diar/`. Gateway ID `stt-a-qwen3-asr-diar`. Image `${var.region}-docker.pkg.dev/${var.project_id}/models/stt-a-qwen3-asr-diar:${var.image_tag}`, default tag `0.1.0`.
 - Routes: `POST /v1beta/interactions` (GPU container), `POST /v1beta/uploads` (upload service). Health `GET /health`. Port `$AIP_HTTP_PORT` (8080). 1 Uvicorn worker, 1 request at a time.
 - Max audio 1800 s. Max inline audio 20 MB decoded. Turn split at 300 s. Merge gap 1.0 s. Drop turns under 0.2 s. `max_speakers=8`. Language detection 1 time on the longest turn, cut to 30 s.
 - Labels `spk_1`, `spk_2` ... in the order of first speech. Offsets `f"{sec:.3f}s"`.
@@ -38,7 +38,7 @@
 ### Task 1: Pin the versions and close the open facts
 
 **Files:**
-- Create: `deployments/stt-a-qwen3-asr-diar-vertex/image/requirements.txt`
+- Create: `deployments/stt-a-qwen3-asr-diar/image/requirements.txt`
 - Modify: `docs/specs/2026-11-19-stt-a-diarization-design.md` (section "Constraints and facts checked")
 
 **Interfaces:**
@@ -53,8 +53,8 @@
 ### Task 2: Pure logic with unit tests
 
 **Files:**
-- Create: `deployments/stt-a-qwen3-asr-diar-vertex/image/app/__init__.py` (empty), `image/app/logic.py`
-- Test: `deployments/stt-a-qwen3-asr-diar-vertex/image/tests/test_logic.py`
+- Create: `deployments/stt-a-qwen3-asr-diar/image/app/__init__.py` (empty), `image/app/logic.py`
+- Test: `deployments/stt-a-qwen3-asr-diar/image/tests/test_logic.py`
 
 **Interfaces:**
 - Produces (in `app/logic.py`):
@@ -86,7 +86,7 @@
   - `test_labels`: first speech order `"B","A","B"` gives `{"B": "spk_1", "A": "spk_2"}`.
   - `test_response_shape`: 2 turns, `diarize=True`: `output_text == "Hello there.\nHi."`, `steps[0]["type"] == "model_output"`, `content[0]["type"] == "text"`, `status == "completed"`, first annotation `== {"type": "word_info", "text": "Hello", "speaker": "spk_1", "start_offset": "0.100s", "end_offset": "0.400s"}`. `diarize=False, words=True`: no `speaker` key. Both `False`: no `annotations` key.
   - `test_error_body`: `error_body("x") == {"error": {"code": 400, "message": "x", "status": "INVALID_ARGUMENT"}}`; `error_body("x", 500)["error"]["status"] == "INTERNAL"`.
-- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar-vertex/image && python3 -m unittest tests.test_logic -v`. Expected: FAIL (`ModuleNotFoundError: app.logic`).
+- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar/image && python3 -m unittest tests.test_logic -v`. Expected: FAIL (`ModuleNotFoundError: app.logic`).
 - [ ] **Step 3:** Implement `app/logic.py`. Order in `make_turns`: drop short segments, merge, split. Language match: lower case, the full code first, then the primary subtag.
 - [ ] **Step 4:** Run the tests again. Expected: all PASS.
 - [ ] **Step 5:** Commit: `git commit -m "feat: STT-A transcription logic with unit tests"`.
@@ -94,8 +94,8 @@
 ### Task 3: FastAPI app with injected models
 
 **Files:**
-- Create: `deployments/stt-a-qwen3-asr-diar-vertex/image/app/main.py`, `image/app/models.py`
-- Test: `deployments/stt-a-qwen3-asr-diar-vertex/image/tests/test_main.py`
+- Create: `deployments/stt-a-qwen3-asr-diar/image/app/main.py`, `image/app/models.py`
+- Test: `deployments/stt-a-qwen3-asr-diar/image/tests/test_main.py`
 
 **Interfaces:**
 - Consumes: all of Task 2.
@@ -114,7 +114,7 @@
   - `test_empty_text_skips_aligner`: a turn text `""` gets no `align` call.
   - `test_aligner_failure_falls_back`: `align` raises `RuntimeError`: HTTP 200, estimated word times.
   - `test_bad_request`: `mode="smart"` with diarization gives 400 with `error_body`.
-- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar-vertex/image && uv run --with fastapi --with httpx --with numpy python -m unittest tests.test_main -v`. Expected: FAIL.
+- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar/image && uv run --with fastapi --with httpx --with numpy python -m unittest tests.test_main -v`. Expected: FAIL.
 - [ ] **Step 3:** Implement `app/main.py`. Model calls run in `asyncio.to_thread` under 1 `asyncio.Lock`. Add the turn start to aligner times. `BadRequest` gives 400. Any other error gives 500 with `error_body(..., 500)`.
 - [ ] **Step 4:** Implement `app/models.py` (`RealModels`, no unit test): copy `$AIP_STORAGE_URI` to `/models` with `google-cloud-storage`; `Qwen3ASRModel.LLM(model="/models/asr", gpu_memory_utilization=0.5, max_new_tokens=4096)`; `Qwen3ForcedAligner.from_pretrained("/models/aligner", dtype=torch.bfloat16, device_map="cuda:0")`; the Pyannote pipeline from `/models/pyannote` on `cuda`, called with `max_speakers=8`, reading `exclusive_speaker_diarization`. `read_gcs` uses `google-cloud-storage`.
 - [ ] **Step 5:** Run the tests of Task 2 and Task 3. Expected: all PASS.
@@ -123,21 +123,21 @@
 ### Task 4: Image build files
 
 **Files:**
-- Create: `deployments/stt-a-qwen3-asr-diar-vertex/image/Dockerfile`, `image/cloudbuild.yaml`, `image/.dockerignore`
+- Create: `deployments/stt-a-qwen3-asr-diar/image/Dockerfile`, `image/cloudbuild.yaml`, `image/.dockerignore`
 
 **Interfaces:**
 - Consumes: the base tag and `requirements.txt` from Task 1; `python3 -m app.main` from Task 3.
 
 - [ ] **Step 1:** `Dockerfile`: `FROM` the Task 1 tag, `apt-get install ffmpeg`, `pip install -r requirements.txt`, copy `app/`, `ENV HF_HUB_OFFLINE=1`, `ENTRYPOINT ["python3", "-m", "app.main"]` (it replaces the vLLM entrypoint). `.dockerignore` excludes `tests/`.
 - [ ] **Step 2:** `cloudbuild.yaml`: copy `deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml`. Change the image name to `stt-a-qwen3-asr-diar` and `_TAG` to `0.1.0`. Fix the comment with the `gcloud builds submit` line for this folder.
-- [ ] **Step 3:** If Docker is installed, run `docker build --check deployments/stt-a-qwen3-asr-diar-vertex/image` (lint only). Expected: no errors. Otherwise, say that the check was skipped.
+- [ ] **Step 3:** If Docker is installed, run `docker build --check deployments/stt-a-qwen3-asr-diar/image` (lint only). Expected: no errors. Otherwise, say that the check was skipped.
 - [ ] **Step 4:** Commit: `git commit -m "feat: STT-A image build files"`.
 
 ### Task 5: Upload URL service
 
 **Files:**
-- Create: `deployments/stt-a-qwen3-asr-diar-vertex/upload/upload.py`
-- Test: `deployments/stt-a-qwen3-asr-diar-vertex/upload/test_upload.py`
+- Create: `deployments/stt-a-qwen3-asr-diar/upload/upload.py`
+- Test: `deployments/stt-a-qwen3-asr-diar/upload/test_upload.py`
 
 **Interfaces:**
 - Produces:
@@ -154,7 +154,7 @@
   - `test_signed_url_shape`: with a fixed `now` and `sign=lambda b: b"x"`, the URL starts with `https://storage.googleapis.com/B/uploads/`, has `X-Goog-Algorithm=GOOG4-RSA-SHA256`, `X-Goog-Expires=900`, `X-Goog-SignedHeaders=content-type%3Bhost%3Bx-goog-content-length-range` and `X-Goog-Signature=78`.
   - `test_string_to_sign`: the bytes given to `sign` start with `GOOG4-RSA-SHA256\n<YYYYMMDDTHHMMSSZ>\n<YYYYMMDD>/auto/storage/goog4_request\n`.
   - `test_answer`: `file_uri == "gs://B/uploads/n"`, `headers == {"Content-Type": "audio/mpeg", "x-goog-content-length-range": "0,123"}`, `expires_in == 900`, `method == "PUT"`.
-- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar-vertex/upload && python3 -m unittest test_upload -v`. Expected: FAIL.
+- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar/upload && python3 -m unittest test_upload -v`. Expected: FAIL.
 - [ ] **Step 3:** Implement `upload.py`. Follow the GCS V4 signing steps (canonical request, then string to sign, then hex of the signature). Copy the CORS header set and the server structure from `infra/modules/cors-proxy/cors_proxy.py`.
 - [ ] **Step 4:** Run the tests again. Expected: all PASS.
 - [ ] **Step 5:** Commit: `git commit -m "feat: STT-A upload URL service"`.
@@ -177,7 +177,7 @@
 ### Task 7: Deployment Terraform
 
 **Files:**
-- Create in `deployments/stt-a-qwen3-asr-diar-vertex/`: `main.tf`, `backend.tf`, `variables.tf`, `outputs.tf`, `gateway.tf`, `cors_proxy.tf`, `upload.tf`, `alerts.tf`
+- Create in `deployments/stt-a-qwen3-asr-diar/`: `main.tf`, `backend.tf`, `variables.tf`, `outputs.tf`, `gateway.tf`, `cors_proxy.tf`, `upload.tf`, `alerts.tf`
 - Test: `tests/deployment.tftest.hcl`, `tests/gateway.tftest.hcl`, `tests/alerts.tftest.hcl`, `tests/upload.tftest.hcl`
 
 **Interfaces:**
@@ -189,15 +189,15 @@
   - `gateway.tftest.hcl`: path `/v1beta/interactions` has `post` and `options` (`security = []`), its backend is the CORS proxy, deadline 300. Path `/v1beta/uploads` has `post` and `options`, its own `x-google-backend` is the upload service URL, deadline 30.
   - `alerts.tftest.hcl`: the filters hold the endpoint ID, `models ready` and `Application shutdown complete.`.
   - `upload.tftest.hcl`: the upload service has `min_instance_count == 0`, no GPU, env `AUDIO_BUCKET` and `SA_EMAIL`; its SA has `roles/storage.objectCreator` on `p-stt-audio` and `roles/iam.serviceAccountTokenCreator` on itself; the gateway SA has `roles/run.invoker` on it.
-- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar-vertex && terraform init -backend=false && terraform test`. Expected: FAIL.
+- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar && terraform init -backend=false && terraform test`. Expected: FAIL.
 - [ ] **Step 3:** Write the files. `main.tf`, `variables.tf`, `backend.tf` (workspace `stt-a-qwen3-asr-diar-vertex`), `alerts.tf`, `cors_proxy.tf`: copy LLM-B and apply the spec section "Terraform" (`predict_route` instead of `invoke_routes`, `:rawPredict` target as LLM-A, `machine_type = "g2-standard-12"`). `upload.tf`: call `infra/modules/model-service` the way `infra/modules/cors-proxy/main.tf` does (stock `python:3.13.9-slim` through the `dockerhub` proxy, `command = ["python3"]`, `args = ["-u", "-c", file("${path.module}/upload/upload.py")]`, `cpu = "1"`, `memory = "256Mi"`, `invokers = []`), plus the 3 IAM members. Note: the spec said "own `google_cloud_run_v2_service`"; the module gives the same result with less code and follows the CORS proxy. `outputs.tf`: LLM-B outputs plus `ui` with `type = "stt"`, `title = "STT-A Qwen3 ASR + speakers"`, `model = "qwen3-asr-diar"`, `features = { cold_start = "vertex-429", max_mb = 20 }`.
-- [ ] **Step 4:** Run `./scripts/check.py deployments/stt-a-qwen3-asr-diar-vertex`. Expected: all `ok`, including `scale alerts`.
+- [ ] **Step 4:** Run `./scripts/check.py deployments/stt-a-qwen3-asr-diar`. Expected: all `ok`, including `scale alerts`.
 - [ ] **Step 5:** Commit: `git commit -m "feat: STT-A diarization deployment on Vertex AI"`.
 
 ### Task 8: UI tab, mock, checks and docs
 
 **Files:**
-- Create: `ui/src/panels/Stt.tsx`, `deployments/stt-a-qwen3-asr-diar-vertex/README.md`
+- Create: `ui/src/panels/Stt.tsx`, `deployments/stt-a-qwen3-asr-diar/README.md`
 - Modify: `ui/src/panels/index.ts`, `ui/mock-server.mjs`, `ui/public/models.mock.json`, `ui/src/lib.test.ts`, `.claude/skills/model-ui/SKILL.md` (features table, `stt` keys), `scripts/check.py`, `infra/README.md`, `docs/README.md`, `docs/backends.md`, `docs/research/03-speech-models.md` (STT-A row points to this deployment)
 
 **Interfaces:**
@@ -208,6 +208,6 @@
 - [ ] **Step 2:** Implement `Stt.tsx` (follow the `model-ui` skill, "new model type"): file input, language select (auto plus the 30 codes), diarization check box (on by default). A file of 20 MB or less goes as inline base64. A larger file goes through `/v1beta/uploads`, the signed `PUT`, then `file_uri`. Show 1 group per turn with 1 color per speaker, and the curl. Add `stt: Stt` to `PANELS`. In the mock, add `POST /v1beta/uploads` (answer with a `upload_url` on the mock itself, which accepts the `PUT`) and `POST /v1beta/interactions` (a fixed 2-speaker answer in the Task 2 shape). Add the tab to `models.mock.json`.
 - [ ] **Step 3:** Run `cd ui && npm test && npm run build`. Expected: PASS. Then use the `verify-ui` skill against the mock (small file and a file over 20 MB) and keep the screenshot.
 - [ ] **Step 4:** `scripts/check.py`: for each `deployments/*/image/tests/` and `deployments/*/upload/`, run `python3 -m unittest` (stdlib tests only). Skip `test_main` with a note when `fastapi` cannot be imported.
-- [ ] **Step 5:** Write the deployment README with real values: `./scripts/preflight.py --weights stt-a-qwen3-asr-diar --l4`; the Hugging Face gate for Pyannote; the 3 weights-copy runs (spec table); `gcloud builds submit` for the image; apply core, then the deployment; `./scripts/vertex.py deploy deployments/stt-a-qwen3-asr-diar-vertex`; `./scripts/ui-deploy.py --config-only`; a test `curl` with inline base64 and 1 with an upload; the Slack check (`models ready` in the logs, both messages arrive); the user checks (GPU memory of the 3 models, a real Gemini answer if available); fields for the real-time factor and the cold start; destroy. Add the deployment to `infra/README.md`, `docs/README.md` and `docs/backends.md` (links, no repeated commands).
+- [ ] **Step 5:** Write the deployment README with real values: `./scripts/preflight.py --weights stt-a-qwen3-asr-diar --l4`; the Hugging Face gate for Pyannote; the 3 weights-copy runs (spec table); `gcloud builds submit` for the image; apply core, then the deployment; `./scripts/vertex.py deploy deployments/stt-a-qwen3-asr-diar`; `./scripts/ui-deploy.py --config-only`; a test `curl` with inline base64 and 1 with an upload; the Slack check (`models ready` in the logs, both messages arrive); the user checks (GPU memory of the 3 models, a real Gemini answer if available); fields for the real-time factor and the cold start; destroy. Add the deployment to `infra/README.md`, `docs/README.md` and `docs/backends.md` (links, no repeated commands).
 - [ ] **Step 6:** Run `./scripts/check.py`. Expected: all `ok`.
 - [ ] **Step 7:** Commit: `git commit -m "feat: STT tab in the test UI and STT-A docs"`.

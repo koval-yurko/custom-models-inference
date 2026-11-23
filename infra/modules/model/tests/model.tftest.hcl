@@ -210,3 +210,46 @@ run "runpod_only" {
     error_message = "a runpod-only proxy still gets the Runpod key"
   }
 }
+
+# STT-A: own image, Runpod volume, stt_api paths and the stt_api SA as a proxy caller.
+run "own_image_volume_extra_paths" {
+  command = apply
+
+  variables {
+    name       = "stt-a-qwen3-asr-diar"
+    gateway_id = "stt-a-qwen3-asr-diar"
+    platforms  = ["vertex", "runpod"]
+    spec = {
+      image        = { own = "stt-a-qwen3-asr-diar:0.2.0" }
+      args         = []
+      health_route = "/health"
+      routes       = ["/v1beta/interactions"]
+      gpu          = "L4"
+      weights      = { hf_repo = "Qwen/Qwen3-ASR-1.7B", gcs_dir = "stt-a-qwen3-asr-diar" }
+    }
+    platform_options = {
+      vertex = { predict_route = "/v1beta/interactions" }
+      runpod = { volume = { data_centers = ["EU-RO-1"] } }
+    }
+    extra_paths    = { "/v1beta/files/{id}" = { backend_url = "https://api", methods = ["get"], deadline = 30 } }
+    proxy_invokers = ["api@p.iam.gserviceaccount.com"]
+  }
+
+  override_module {
+    target  = module.runpod[0].module.registry[0]
+    outputs = { id = "reg1" }
+  }
+
+  assert {
+    condition     = contains(keys(output.openapi.paths), "/runpod/v1beta/files/{id}") && output.openapi.paths["/v1beta/files/{id}"].get["x-google-backend"].address == "https://api"
+    error_message = "extra paths go to their own backend, with the platform prefix too"
+  }
+  assert {
+    condition     = output.runpod_volumes.volumes[0].data_center == "EU-RO-1" && output.runpod_volumes.dir == "stt-a-qwen3-asr-diar"
+    error_message = "the volume output for scripts/runpod-weights.py"
+  }
+  assert {
+    condition     = output.proxy_url == "https://proxy" && output.vertex_service_account_email != null
+    error_message = "proxy URL and Vertex AI SA outputs"
+  }
+}

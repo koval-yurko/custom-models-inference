@@ -74,3 +74,34 @@ output "scale_watch_ids" {
     contains(var.platforms, "runpod") ? { runpod = module.runpod[0].endpoint_id } : {},
   )
 }
+
+output "proxy_url" {
+  description = "URL of the CORS proxy (private). The STT-A stt_api service calls <proxy_url>/<platform>/v1beta/interactions."
+  value       = module.cors_proxy.url
+}
+
+output "vertex_service_account_email" {
+  description = "Service account of the Vertex AI model. null without vertex."
+  value       = try(module.vertex[0].service_account_email, null)
+}
+
+output "runpod_volumes" {
+  description = "Runpod network volumes of the weights { dir, volumes = [{ id, data_center }] } (scripts/runpod-weights.py). null without them."
+  value       = try(module.runpod[0].volumes, null)
+}
+
+
+output "gateway_service_account_email" {
+  description = "Service account of the API Gateway. A backend outside the proxy (STT-A stt_api) gives it run.invoker."
+  value       = module.gateway.service_account_email
+}
+
+output "runpod_env" {
+  description = "The env of the Runpod template (for tests). null without runpod."
+  value       = try(module.runpod[0].env, null)
+}
+
+output "proxy_extra_invoker_count" {
+  description = "Number of proxy_invokers that got run.invoker on the proxy (for tests)."
+  value       = module.cors_proxy.extra_invoker_count
+}

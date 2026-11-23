@@ -14,7 +14,7 @@ The user also tests STT-A after each change (model, image, settings). To compare
 
 ## Goals
 
-1. `deployments/stt-a-qwen3-asr-diar-vertex/` deploys 1 custom container on a Vertex AI endpoint with 1 L4.
+1. `deployments/stt-a-qwen3-asr-diar/` deploys 1 custom container on a Vertex AI endpoint with 1 L4.
 2. The container runs 3 models: Qwen3-ASR-1.7B (text), Qwen3-ForcedAligner-0.6B (word times), Pyannote `speaker-diarization-community-1` (speakers).
 3. `POST /v1beta/interactions` accepts the Gemini 3.5 Transcribe request and returns `output_text` and `word_info` annotations.
 4. Speakers per word work in all 30 Qwen3-ASR languages.
@@ -239,7 +239,7 @@ Response (HTTP 200):
 - `annotations`: present when `diarization_mode == "speaker"` or `"word"` is in `timestamp_granularities`. Offsets are strings in seconds with 3 decimals and the suffix `s`.
 - `steps[].type` and `content[].type` copy the general Interactions shape. Check them against a real Gemini answer before release.
 
-### Container (`deployments/stt-a-qwen3-asr-diar-vertex/services/speech_engine/`)
+### Container (`deployments/stt-a-qwen3-asr-diar/services/speech_engine/`)
 
 - `Dockerfile`: `FROM vllm/vllm-openai:v0.14.0`. LLM-B uses v0.33.0, but `qwen-asr` 0.0.6 pins vLLM 0.14.0 (fact 4). Install `qwen-asr`, `pyannote.audio` 4.x, `soundfile`, `google-cloud-storage`. Also `ffmpeg` to decode mp3, m4a, ogg and webm.
 - `speech_engine/logic.py`: pure functions, no model imports (turns, language map, word times, labels, response, request check). Unit tests run without a GPU.
@@ -295,7 +295,7 @@ files/<id>/versions/<version_id>.names.json  speaker names of that run, {"spk_1"
 - `image_tag` comes from the env value `IMAGE_TAG` of the STT API service. Terraform sets it from `var.image_tag`, the same value as the GPU image. It is the tag in Terraform, not a value that the GPU reports. If the user builds a new image but does not apply, the tag can be wrong. This is a known limit.
 - `label` is optional free text from the user, 200 chars at most (my call: it makes a test run easy to find).
 
-### STT API service (`deployments/stt-a-qwen3-asr-diar-vertex/services/stt_api/`)
+### STT API service (`deployments/stt-a-qwen3-asr-diar/services/stt_api/`)
 
 A small CPU service on Cloud Run. It gives upload URLs without a GPU cold start, keeps the file list and the history, and calls the GPU service for "transcribe again".
 

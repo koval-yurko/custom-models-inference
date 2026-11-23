@@ -39,6 +39,17 @@ resource "google_cloud_run_v2_service_iam_member" "gateway_invoker" {
   member   = "serviceAccount:${var.gateway_service_account_email}"
 }
 
+# count, not for_each: an email of a service account made in the same apply is unknown at plan time.
+resource "google_cloud_run_v2_service_iam_member" "extra_invoker" {
+  count = length(var.extra_invokers)
+
+  project  = var.project_id
+  location = var.region
+  name     = module.service.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${var.extra_invokers[count.index]}"
+}
+
 # The provider has no IAM resource for 1 Vertex AI endpoint, so the role is on the project.
 # The member is the proxy SA of this module call only, so destroy removes only this binding.
 resource "google_project_iam_member" "predict" {

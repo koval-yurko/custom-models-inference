@@ -46,13 +46,13 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 
 - `scripts/ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`), and the tab when no platform is left. Then `base_url` is the first platform that is left.
 - The tab shows a platform picker when 2 or more platforms are left. The panel gets `base_url` and `cold_start` of the chosen platform; the panel code does not change. The choice stays in `localStorage` per model and in the hash `#/<tab>@<platform>` (an STT link is `#/<tab>@<platform>/<file id>` or `#/<tab>/<file id>`).
-- Example: `deployments/llm-a-gemma4-12b-vllm-vertex/outputs.tf`. Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.
+- Examples: `deployments/llm-a-gemma4-12b-vllm-vertex/outputs.tf`, `deployments/stt-a-qwen3-asr-diar/outputs.tf` (STT: the files paths get the same `/<platform>` prefix, so the panel works on each platform with no change). Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.
 
 `features` by type (the panel reads only these keys; add a key when you add a feature):
 
 | type | key | meaning |
 |---|---|---|
-| all | `cold_start` | `retry-429` (Vertex AI, Runpod) or its old name `vertex-429`: the platform returns 429 at 0 replicas. The UI retries every 30 s, at most 60 times, on a real 429 only (not on a network error). The answer must pass the CORS proxy, or the browser hides the 429. `hold`: the platform holds the request until a replica is ready (no platform uses it now). The UI does not retry on 429 and shows a note under the picker. The LLM panels also send the chat again after a gateway time limit (504, or a network error after 30 s or more) on any platform that scales to 0. For a deployment on `infra/modules/model`, `cold_start` is in each platform entry, not in `features`. LLM-B and STT-A (no `platforms` yet) keep `features.cold_start = "vertex-429"`. |
+| all | `cold_start` | `retry-429` (Vertex AI, Runpod) or its old name `vertex-429`: the platform returns 429 at 0 replicas. The UI retries every 30 s, at most 60 times, on a real 429 only (not on a network error). The answer must pass the CORS proxy, or the browser hides the 429. `hold`: the platform holds the request until a replica is ready (no platform uses it now). The UI does not retry on 429 and shows a note under the picker. The LLM panels also send the chat again after a gateway time limit (504, or a network error after 30 s or more) on any platform that scales to 0. For a deployment on `infra/modules/model`, `cold_start` is in each platform entry, not in `features`. LLM-B (no `platforms` yet) keeps `features.cold_start = "vertex-429"`. |
 | `tts` | `stream` | Gateway streaming is on (`scripts/gateway-streaming.py`). Enables "Stream and play at once" (PCM). |
 | `tts` | `voices`, `default_voice` | `GET /v1/audio/voices` exists and returns `{"voices": [...]}`. |
 | `tts` | `formats`, `sample_rate` | `response_format` values; sample rate of `pcm` (16-bit mono). |

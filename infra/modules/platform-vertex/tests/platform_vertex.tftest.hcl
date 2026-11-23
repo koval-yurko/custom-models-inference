@@ -42,7 +42,7 @@ run "same_upload_as_today" {
     error_message = "predict_route must stay"
   }
   assert {
-    condition     = contains(output.vertex.model_upload.model.containerSpec.env, { name = "HF_HUB_OFFLINE", value = "1" })
+    condition     = contains(output.vertex.model_upload.model.containerSpec.env, { name = "HF_HUB_OFFLINE", value = "1" }) && !contains([for e in output.vertex.model_upload.model.containerSpec.env : e.name], "SETUP_PLATFORM")
     error_message = "vertex reads the weights from GCS: HF_HUB_OFFLINE=1"
   }
   assert {
@@ -133,6 +133,10 @@ run "own_image" {
   assert {
     condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/llm-b:1"
     error_message = "an own image comes from the models repo"
+  }
+  assert {
+    condition     = contains(output.vertex.model_upload.model.containerSpec.env, { name = "SETUP_PLATFORM", value = "vertex" })
+    error_message = "an own image gets SETUP_PLATFORM (container contract)"
   }
 }
 

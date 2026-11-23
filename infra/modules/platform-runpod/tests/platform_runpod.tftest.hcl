@@ -2,6 +2,9 @@ mock_provider "runpod" {
   mock_resource "runpod_serverless_endpoint" {
     defaults = { request_urls = { base = "https://ep1.api.runpod.ai" } }
   }
+  mock_resource "runpod_network_volume" {
+    defaults = { id = "vol1" }
+  }
 }
 
 variables {
@@ -168,7 +171,56 @@ run "cpu_fails" {
   expect_failures = [runpod_template.this]
 }
 
-run "own_image_fails" {
+run "own_image_with_volume" {
+  command = apply
+
+  override_module {
+    target  = module.registry[0]
+    outputs = { id = "reg1" }
+  }
+
+  variables {
+    name = "stt-a-qwen3-asr-diar"
+    spec = {
+      image        = { own = "stt-a-qwen3-asr-diar:0.2.0" }
+      args         = []
+      env          = { AUDIO_BUCKET = "b" }
+      port         = 8080
+      health_route = "/health"
+      routes       = ["/v1beta/interactions"]
+      gpu          = "L4"
+      weights      = { hf_repo = "Qwen/Qwen3-ASR-1.7B", gcs_dir = "stt-a-qwen3-asr-diar" }
+    }
+    options = { gpu_pools = ["AMPERE_24", "ADA_24"], volume = { data_centers = ["EU-RO-1", "EUR-IS-1"] } }
+  }
+
+  assert {
+    condition     = runpod_template.this.image == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.2.0" && runpod_template.this.registry == "reg1"
+    error_message = "own image from the Artifact Registry repo models, with the gcp-models registry credential"
+  }
+  assert {
+    condition     = runpod_template.this.env == tomap({ AUDIO_BUCKET = "b", HF_HUB_OFFLINE = "1", PORT = "8080", PORT_HEALTH = "8080", HEALTH_CHECK_PATH = "/health", SETUP_PLATFORM = "runpod", MODEL = "/runpod-volume/stt-a-qwen3-asr-diar" })
+    error_message = "env: offline, the weights folder on the volume, the platform of the setup record"
+  }
+  assert {
+    condition     = runpod_template.this.args == ""
+    error_message = "no revision flag with a volume"
+  }
+  assert {
+    condition     = keys(runpod_network_volume.this) == ["EU-RO-1", "EUR-IS-1"] && alltrue([for dc, v in runpod_network_volume.this : v.data_center == dc && v.size == 20 && v.type == "STANDARD" && v.name == "stt-a-qwen3-asr-diar"])
+    error_message = "1 network volume per data center, 20 GB STANDARD"
+  }
+  assert {
+    condition     = length(runpod_serverless_endpoint.this.network_volumes) == 2 && runpod_serverless_endpoint.this.data_center_ids == tolist(["EU-RO-1", "EUR-IS-1"])
+    error_message = "the endpoint mounts all volumes and runs only in their data centers"
+  }
+  assert {
+    condition     = output.volumes == { dir = "stt-a-qwen3-asr-diar", volumes = [{ id = "vol1", data_center = "EU-RO-1" }, { id = "vol1", data_center = "EUR-IS-1" }] }
+    error_message = "the volume output for scripts/runpod-weights.py"
+  }
+}
+
+run "volume_needs_gcs_dir" {
   command = plan
 
   variables {
@@ -176,12 +228,49 @@ run "own_image_fails" {
       image        = { own = "x:1" }
       args         = []
       health_route = "/health"
-      routes       = ["/v1/x"]
+      routes       = ["/v1"]
       gpu          = "L4"
+      weights      = { hf_repo = "a/b" }
     }
+    options = { volume = { data_centers = ["EU-RO-1"] } }
   }
 
   expect_failures = [runpod_template.this]
+}
+
+run "own_image_needs_registry" {
+  command = plan
+
+  variables {
+    spec = {
+      image        = { own = "x:1" }
+      args         = []
+      health_route = "/health"
+      routes       = ["/v1"]
+      gpu          = "L4"
+    }
+    options = { registry = "missing" }
+  }
+
+  override_module {
+    target  = module.registry[0]
+    outputs = { id = null }
+  }
+
+  expect_failures = [runpod_template.this]
+}
+
+run "stock_image_has_no_volume_or_registry" {
+  command = apply
+
+  assert {
+    condition     = length(runpod_network_volume.this) == 0 && length(coalesce(runpod_serverless_endpoint.this.network_volumes, [])) == 0 && output.volumes == null
+    error_message = "LLM-A (stock image, no volume option) gets no volume"
+  }
+  assert {
+    condition     = !contains(keys(runpod_template.this.env), "SETUP_PLATFORM") && !contains(keys(runpod_template.this.env), "MODEL")
+    error_message = "no contract env for a stock image: the LLM-A template must not change"
+  }
 }
 
 # The endpoint copies the template only once (template_id), so a template change must replace the endpoint.

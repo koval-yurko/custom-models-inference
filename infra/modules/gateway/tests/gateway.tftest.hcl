@@ -105,6 +105,28 @@ run "extra_paths_get_prefix_and_own_backend" {
   }
 }
 
+run "path_parameters" {
+  command = apply
+
+  variables {
+    platforms = ["vertex", "runpod"]
+    deadlines = { vertex = 300, runpod = 300 }
+    extra_paths = {
+      "/v1beta/files/{id}/versions/{version_id}" = { backend_url = "https://api", methods = ["get"], deadline = 30 }
+    }
+  }
+
+  assert {
+    condition = alltrue([for k in ["/v1beta/files/{id}/versions/{version_id}", "/runpod/v1beta/files/{id}/versions/{version_id}"] :
+    alltrue([for m in ["get", "options"] : output.openapi.paths[k][m].parameters == [{ name = "id", in = "path", required = true, type = "string" }, { name = "version_id", in = "path", required = true, type = "string" }]])])
+    error_message = "each {name} in a path is a required path parameter, on every method and on options"
+  }
+  assert {
+    condition     = !contains(keys(output.openapi.paths["/v1/chat/completions"].post), "parameters") && !contains(keys(output.openapi.paths["/runpod/v1/chat/completions"].options), "parameters")
+    error_message = "a path without {name} has no parameters key (the documents of the other models do not change)"
+  }
+}
+
 run "sa_id_max_30" {
   command = apply
 

@@ -4,7 +4,7 @@ Both are private and scale to zero. Pick one when you add a model.
 
 | | Cloud Run (`model-service`) | Vertex AI (`vertex-model`) |
 |---|---|---|
-| Used for | TTS Kokoro (CPU), the STT-A files service (CPU) | LLM Gemma 4, LLM-B Qwen3.5, STT-A Qwen3-ASR + Pyannote (1 L4 GPU each) |
+| Used for | TTS Kokoro (CPU), the STT-A files service (CPU) | LLM Gemma 4, LLM-B Qwen3.5, STT-A Qwen3-ASR + Pyannote (1 L4 GPU each; LLM-A and STT-A also on Runpod) |
 | Created by | Terraform only | Terraform (endpoint) + `deploy.py deploy` or `vertex.py deploy` (model) |
 | Weights | Read-only mount at `/models` | The container reads `$AIP_STORAGE_URI` |
 | Image source | `ghcr` or `models` repo | `dockerhub` proxy repo (Vertex AI pulls only from Artifact Registry) |
@@ -94,7 +94,7 @@ sequenceDiagram
 
 - `OPTIONS`: the proxy answers it itself. It never calls Vertex AI, so a preflight never starts a GPU.
 - `POST`: the proxy forwards the body to `:rawPredict`, streams the answer back (SSE works) and adds the CORS headers. It keeps the status code, so a 429 reaches the UI as a 429.
-- Platforms: a model on `infra/modules/model` can have several platforms. The first path segment picks one: `/vertex/...` goes to Vertex AI with the proxy SA token, `/runpod/...` goes to the Runpod endpoint with the key `RUNPOD_API_KEY` (Secret Manager secret `runpod-api-key`). The browser never sees the Runpod key. At 0 workers Runpod answers "no workers available". The proxy changes it to 429 with `Retry-After: 30`, so the UI retries in the same way.
+- Platforms: a model on `infra/modules/model` can have several platforms. The first path segment picks one: `/vertex/...` goes to Vertex AI with the proxy SA token, `/runpod/...` goes to the Runpod endpoint with the key `RUNPOD_API_KEY` (Secret Manager secret `runpod-api-key`). The browser never sees the Runpod key. At 0 workers Runpod holds the request while a worker starts. When no answer comes in 280 s, the proxy answers 429 with `Retry-After: 30`, so the UI retries in the same way (a 504 when the worker answered in the last 300 s: then the request is only slow). STT-A: the `stt_api` service also calls the GPU through the proxy (`/<platform>/v1beta/interactions`, with a Google ID token) and sends a signed GCS URL of the audio, so a Runpod worker needs no GCP credentials.
 - If the call to Vertex AI fails, the proxy answers 502 with CORS headers and the text `proxy: <cause>`.
 - The code is `infra/modules/cors-proxy/cors_proxy.py` (standard library only) in the stock `python` image. There is no image build.
 - The TTS gateway does not use it: Kokoro answers CORS itself.

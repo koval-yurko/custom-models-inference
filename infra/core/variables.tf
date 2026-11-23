@@ -55,3 +55,18 @@ variable "runpod_api_key" {
   ephemeral   = true
   sensitive   = true
 }
+
+variable "runpod_s3_access_key" {
+  description = "Runpod S3 API access key (user_...). Ephemeral: it goes to Secret Manager (runpod-s3-access-key) and never into state. scripts/runpod-weights.py --cloud reads it."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}
+
+variable "runpod_s3_secret_key" {
+  description = "Runpod S3 API secret key (rps_...). Ephemeral: it goes to Secret Manager (runpod-s3-secret-key) and never into state."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}
+

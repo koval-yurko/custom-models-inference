@@ -58,6 +58,12 @@ variable "gateway_service_account_email" {
   type        = string
 }
 
+variable "extra_invokers" {
+  description = "More service accounts that may call the proxy (for example the STT-A stt_api service). The emails can be unknown at plan time."
+  type        = list(string)
+  default     = []
+}
+
 variable "image" {
   description = "Stock image that runs cors_proxy.py (standard library only). Use the dockerhub proxy repo of infra/core."
   type        = string

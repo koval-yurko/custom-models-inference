@@ -24,6 +24,10 @@ run "only_gateway_calls_and_proxy_predicts" {
     error_message = "only the proxy SA gets aiplatform.user"
   }
   assert {
+    condition     = length(google_cloud_run_v2_service_iam_member.extra_invoker) == 0
+    error_message = "no extra invokers by default"
+  }
+  assert {
     condition     = jsondecode(output.env.TARGETS).vertex.append_path == false && output.env.DEFAULT == "vertex"
     error_message = "the proxy env must hold TARGETS and DEFAULT"
   }
@@ -64,5 +68,18 @@ run "no_predict_role_without_google_target" {
   assert {
     condition     = length(google_project_iam_member.predict) == 0
     error_message = "no aiplatform.user without a google target"
+  }
+}
+
+run "extra_invokers_may_call" {
+  command = apply
+
+  variables {
+    extra_invokers = ["api@p.iam.gserviceaccount.com"]
+  }
+
+  assert {
+    condition     = google_cloud_run_v2_service_iam_member.extra_invoker[0].member == "serviceAccount:api@p.iam.gserviceaccount.com" && google_cloud_run_v2_service_iam_member.extra_invoker[0].role == "roles/run.invoker"
+    error_message = "an extra invoker gets roles/run.invoker on the proxy"
   }
 }

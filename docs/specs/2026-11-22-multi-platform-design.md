@@ -94,9 +94,9 @@ These make the work a failure, even if it runs:
 | L4 is GPU type `"NVIDIA L4"` in pool `AMPERE_24` (with A5000 and 3090). | docs.runpod.io gpu-types |
 | Both providers fail in `Configure` when the API key is empty. | `provider.go` of both repos |
 | `infra/core` already needs Terraform 1.11 (write-only arguments). The deployments say `>= 1.7`. | `infra/core/versions.tf` |
-| STT-A (master `fd8a12f`): the GPU image is `services/speech_engine` (reads `AIP_HTTP_PORT`, `AIP_STORAGE_URI`, reads `gs://` audio itself). The CPU service is `services/stt_api` (Cloud Run, own image, `stt_api.tf`, Terraform address `module.stt_api`). `stt_api` calls the GPU `:rawPredict` URL from env `TARGET`. `stt_api/gcp.py` already has `signed_get`. | `deployments/stt-a-qwen3-asr-diar-vertex/` |
+| STT-A (master `fd8a12f`): the GPU image is `services/speech_engine` (reads `AIP_HTTP_PORT`, `AIP_STORAGE_URI`, reads `gs://` audio itself). The CPU service is `services/stt_api` (Cloud Run, own image, `stt_api.tf`, Terraform address `module.stt_api`). `stt_api` calls the GPU `:rawPredict` URL from env `TARGET`. `stt_api/gcp.py` already has `signed_get`. | `deployments/stt-a-qwen3-asr-diar/` |
 | STT-A saves a setup record with each version (`SETUP_ASR`, `SETUP_ALIGNER`, `SETUP_DIARIZATION`, `SETUP_IMAGE_TAG` env vars of the GPU image) and averages the scores per setup (`GET /v1beta/scores`, WER, cpWER, DER, speed). | `services/speech_engine/speech_engine/main.py`, `services/stt_api/stt_api/evaluation/` |
-| STT-A scale-up from 0 on Vertex AI took 7 min 19 s (measured). | `deployments/stt-a-qwen3-asr-diar-vertex/README.md` |
+| STT-A scale-up from 0 on Vertex AI took 7 min 19 s (measured). | `deployments/stt-a-qwen3-asr-diar/README.md` |
 | `scripts/check.py` runs Python tests only in `deployments/*/image/tests` and `deployments/*/services/*/tests`. | `scripts/check.py` |
 | `scripts/gateway-streaming.py` replaces the gateway and imports it at the fixed address `google_api_gateway_gateway.this`. | `scripts/gateway-streaming.py` line 110 |
 | The UI calls `model.base_url + path` in `call()` and `curlFor()`. Retry on 429 only when `features.cold_start === "vertex-429"`. | `ui/src/api.ts` |
@@ -411,7 +411,7 @@ Each phase is one plan and one card. Each phase ends with `./scripts/check.py` g
 | 3. Runpod | `platform-runpod`. Keys in `.env`, `hcp-sync.py`, `infra/core` secrets. Runpod HF secret (user, console). Proxy 429 mapping. LLM-A on `["vertex", "runpod"]` | First cold call through `/runpod/` answers. Cold start time is in the LLM-A README |
 | 4. Baseten | `platform-baseten`, Baseten provider and `baseten_secret` in `infra/core`. LLM-A on `["vertex", "runpod", "baseten"]` | First cold call through `/baseten/` answers. Autoscaling shows `min_replica = 0` after apply. Cold start time in the README |
 | 5. Slack | `scale-watch` job and scheduler, `slack-bot-token` secret | Slack shows "ready" and "scaled to 0" for a Runpod and a Baseten cold start |
-| 6. Own images | Container contract in LLM-B and STT-A. Registry access. `stt_api` sends signed GET URLs and calls the GPU through the proxy. Move LLM-B and STT-A into the facade. Remove the `vertex-model` wrapper | LLM-B and STT-A answer on all 3 platforms |
+| 6. Own images | Container contract in LLM-B and STT-A. Registry access. `stt_api` sends signed GET URLs and calls the GPU through the proxy. Move LLM-B and STT-A into the facade. Remove the `vertex-model` wrapper | LLM-B and STT-A answer on all 3 platforms. STT-A part: code done on 2026-11-23 (plan `2026-11-23-stt-a-runpod-plan.md`; weights on a Runpod network volume, not a Hugging Face download). LLM-B and the wrapper removal are open |
 
 ## Calls I made (check them)
 

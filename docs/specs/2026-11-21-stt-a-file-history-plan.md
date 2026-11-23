@@ -4,7 +4,7 @@
 
 **Goal:** Keep every uploaded STT-A audio file and every transcript run in the audio bucket, with a CPU files service (list, history, transcribe again) and a UI to browse and compare versions.
 
-**Architecture:** The upload service (`deployments/stt-a-qwen3-asr-diar-vertex/upload/upload.py`) becomes the files service. It stays 1 stdlib file, because it runs as `python3 -c <file>`. A pure `route(method, path, body, store, gpu, cfg, now)` function holds all route logic, so tests call it with a fake store and a fake GPU. The HTTP handler only parses and writes. The GPU service does not change. Terraform renames the service, adds IAM and 4 gateway paths. The UI STT panel is rebuilt around the files list.
+**Architecture:** The upload service (`deployments/stt-a-qwen3-asr-diar/upload/upload.py`) becomes the files service. It stays 1 stdlib file, because it runs as `python3 -c <file>`. A pure `route(method, path, body, store, gpu, cfg, now)` function holds all route logic, so tests call it with a fake store and a fake GPU. The HTTP handler only parses and writes. The GPU service does not change. Terraform renames the service, adds IAM and 4 gateway paths. The UI STT panel is rebuilt around the files list.
 
 **Tech Stack:** Python 3.13 stdlib (`urllib`, `http.server`), GCS JSON API, Terraform `google` / `google-beta` `~> 8.10`, React + Vite + vitest.
 
@@ -48,8 +48,8 @@
 ### Task 2: Files service logic and routes
 
 **Files:**
-- Modify: `deployments/stt-a-qwen3-asr-diar-vertex/upload/upload.py`
-- Test: `deployments/stt-a-qwen3-asr-diar-vertex/upload/test_upload.py`
+- Modify: `deployments/stt-a-qwen3-asr-diar/upload/upload.py`
+- Test: `deployments/stt-a-qwen3-asr-diar/upload/test_upload.py`
 
 **Interfaces:**
 - Consumes: the existing `AUDIO_TYPES`, `signed_put`, `error`, `sign_blob`, `token`, `CORS`.
@@ -81,7 +81,7 @@
   - `test_bad_ids_touch_no_store`: paths `/v1beta/files/..`, `/v1beta/files/not-a-uuid`, `/v1beta/files/<id>/versions/x`, `/v1beta/files/<id>/versions/..%2F` give 400, and the store has 0 calls.
   - `test_unknown_route`: `GET /v1beta/nope` gives 404.
   - `test_gcs_list_follows_pages`: `GcsStore.list` with `urllib.request.urlopen` patched to return 2 pages (the first with `nextPageToken`) returns the items of both pages.
-- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar-vertex/upload && python3 -m unittest test_upload -v`. Expected: FAIL.
+- [ ] **Step 2:** Run `cd deployments/stt-a-qwen3-asr-diar/upload && python3 -m unittest test_upload -v`. Expected: FAIL.
 - [ ] **Step 3:** Implement. `route` checks ids with `ID_RE` / `VERSION_RE` before any store call. `meta.json` holds `{"id", "name", "mime_type", "size_bytes", "created"}` in the body and `name`, `created` as metadata. Version JSON as in the spec. The handler: `do_GET` and `do_POST` read the body (a bad `Content-Length` gives 400, inside the `try`), call `route`, and reply with CORS headers. A `201` and a GPU status pass through. GPU error bodies pass through as JSON when they parse, else as `error(text, status)`.
 - [ ] **Step 4:** Run the tests again. Expected: all PASS. Then `wc -c upload.py` and compare with the Task 1 limit.
 - [ ] **Step 5:** Commit: `git commit -m "feat: STT-A files service (list, history, transcribe again)"`.
@@ -90,7 +90,7 @@
 
 **Files:**
 - Modify: `infra/core/main.tf`, `infra/core/tests/core.tftest.hcl`
-- Modify: `deployments/stt-a-qwen3-asr-diar-vertex/upload.tf`, `gateway.tf`, `outputs.tf` (if a name changes), `tests/upload.tftest.hcl`, `tests/gateway.tftest.hcl`
+- Modify: `deployments/stt-a-qwen3-asr-diar/upload.tf`, `gateway.tf`, `outputs.tf` (if a name changes), `tests/upload.tftest.hcl`, `tests/gateway.tftest.hcl`
 
 **Interfaces:**
 - Consumes: the route list and env names of Task 2; the timeout facts of Task 1.
@@ -99,9 +99,9 @@
   - `core.tftest.hcl` `stt_audio_bucket`: `length(lifecycle_rule) == 0` and `force_destroy == false` (replace the 1-day asserts).
   - `upload.tftest.hcl`: service name `stt-a-qwen3-asr-diar-files`; `local.upload_env == { AUDIO_BUCKET = "p-stt-audio", SA_EMAIL = ..., IMAGE_TAG = "0.1.0", TARGET = <the :rawPredict URL, the same expression as module.cors_proxy target> }`; a new `google_storage_bucket_iam_member.upload_read` with `roles/storage.objectViewer` on `p-stt-audio`; a new `google_project_iam_member.upload_predict` with `roles/aiplatform.user` for the files SA.
   - `gateway.tftest.hcl`: the path keys are exactly `/v1beta/files`, `/v1beta/files/{id}`, `/v1beta/files/{id}/transcribe`, `/v1beta/files/{id}/versions/{version_id}`, `/v1beta/interactions`, `/v1beta/uploads`. Every operation of every path except `/v1beta/interactions` has `x-google-backend.address == module.upload.url`. `transcribe` `post` has deadline 300; the others 30. Path parameters `id` and `version_id` are declared (`in = "path"`, `required = true`, `type = "string"`) on the operations that use them. The existing security asserts still hold.
-- [ ] **Step 2:** Run `./scripts/check.py infra/core deployments/stt-a-qwen3-asr-diar-vertex`. Expected: FAIL in `test`.
+- [ ] **Step 2:** Run `./scripts/check.py infra/core deployments/stt-a-qwen3-asr-diar`. Expected: FAIL in `test`.
 - [ ] **Step 3:** Implement. Keep the Terraform name `module.upload` (fewer renames); only the service name changes (`"${local.gateway_id}-files"`). `timeout = "3600s"`. Put the `:rawPredict` URL in a local in `cors_proxy.tf` and use it in both places. If Task 1 found an endpoint timeout field, set it to 3600 s here and add a test assert.
-- [ ] **Step 4:** Run `./scripts/check.py infra/core deployments/stt-a-qwen3-asr-diar-vertex`. Expected: all `ok`.
+- [ ] **Step 4:** Run `./scripts/check.py infra/core deployments/stt-a-qwen3-asr-diar`. Expected: all `ok`.
 - [ ] **Step 5:** Commit: `git commit -m "feat: STT-A files service Terraform and gateway paths"`.
 
 ### Task 4: UI and mock
@@ -128,7 +128,7 @@
 ### Task 5: Docs
 
 **Files:**
-- Modify: `deployments/stt-a-qwen3-asr-diar-vertex/README.md`, `.claude/skills/model-ui/SKILL.md` (the `stt` row), `infra/README.md` (only if it names the upload service)
+- Modify: `deployments/stt-a-qwen3-asr-diar/README.md`, `.claude/skills/model-ui/SKILL.md` (the `stt` row), `infra/README.md` (only if it names the upload service)
 
 - [ ] **Step 1:** README: the route table with the 5 files routes; the test section uses upload, then `transcribe` (not the direct route), and says that only `transcribe` runs are saved; the real-deploy checks: a re-run makes a new version; a long file (over 300 s) gets a version or not (write down which); the bucket keeps files forever (no automatic delete) and how to delete by hand (`gcloud storage rm -r gs://$GCP_PROJECT_ID-stt-audio/files/<id>/`).
 - [ ] **Step 2:** `model-ui` skill: the `stt` row describes the files routes.

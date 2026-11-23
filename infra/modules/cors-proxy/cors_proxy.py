@@ -4,6 +4,8 @@
 # TARGETS (JSON) maps a platform id to {url, append_path, auth}. The first path segment picks the target
 # (/vertex/v1/x -> vertex, path /v1/x). Any other path goes to DEFAULT with the full path (the old paths).
 # A Runpod answer "no workers available" becomes 429 with Retry-After: 30 (cold_answer), so the UI retries.
+# Runpod holds a request at 0 workers until a worker is up, longer than the 300 s gateway deadline for a slow
+# cold start. So a non-google target that sends no answer headers in COLD_WAIT seconds also gets 429 (wait_answer).
 import http.client, json, os, sys, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -17,6 +19,7 @@ CORS = {
 META = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 _tok = {"value": "", "exp": 0.0}
 KEYS = {"runpod": "RUNPOD_API_KEY"}  # auth -> env var (a Secret Manager secret)
+_ok = {}  # platform id -> time of its last answer below 500 (in this instance)
 
 
 def load_targets(environ):
@@ -64,6 +67,16 @@ def cold_answer(auth, status, body):
     return auth == "runpod" and 400 <= status < 600 and b"no worker" in body.lower()  # "no worker(s) available"
 
 
+def wait_answer(pid, last_ok, now, cold_wait, warm_seconds):
+    """(status, message) when a non-google target sent no answer headers in cold_wait seconds.
+    It answered within warm_seconds (its idle timeout): a worker is up and the request is only slow, so 504.
+    A retry would run the same long request again. Else the worker is starting: 429, so the client retries.
+    shortcut: _ok is per proxy instance; a new instance treats a warm worker as cold (1 extra retry at most)."""
+    if now - last_ok < warm_seconds:
+        return 504, f"proxy: {pid} sent no answer in {cold_wait} s"
+    return 429, f"proxy: {pid} is starting, retry in 30 s"
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -93,13 +106,27 @@ class H(BaseHTTPRequestHandler):
             t = TARGETS[pid]
             u = urlsplit(upstream_url(t, rest))
             headers = upstream_headers(method, auth_header(t["auth"], os.environ, token))
-            conn = http.client.HTTPSConnection(u.netloc, timeout=TIMEOUT)
-            conn.request(method, u.path + ("?" + u.query if u.query else ""), body, headers)
-            r = conn.getresponse()
+            cold = t["auth"] != "google"
+            conn = http.client.HTTPSConnection(u.netloc, timeout=COLD_WAIT if cold else TIMEOUT)
+            try:
+                conn.request(method, u.path + ("?" + u.query if u.query else ""), body, headers)
+                r = conn.getresponse()
+            except TimeoutError:
+                if not cold:
+                    raise
+                conn.close()
+                code, msg = wait_answer(pid, _ok.get(pid, 0.0), time.time(), COLD_WAIT, WARM_SECONDS)
+                print(f"{pid} wait: {code} after {COLD_WAIT} s", file=sys.stderr)
+                return self.reply(code, {"Content-Type": "application/json", **({"Retry-After": "30"} if code == 429 else {})},
+                                  [json.dumps({"error": msg}).encode()])
+            if cold and getattr(conn, "sock", None):  # the answer started: the body may take up to TIMEOUT
+                conn.sock.settimeout(TIMEOUT)
         except Exception as e:  # the gateway must always get an answer with CORS headers
             msg = json.dumps({"error": f"proxy: {e}"}).encode()
             return self.reply(502, {"Content-Type": "application/json"}, [msg])
         keep = {k: v for k, v in r.getheaders() if k.lower() in ("content-type", "retry-after")}
+        if r.status < 500:
+            _ok[pid] = time.time()
         if t["auth"] != "google" and r.status >= 400:  # an error body is small: read it to check for a cold start
             body = r.read()
             conn.close()
@@ -121,4 +148,6 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     TARGETS, DEFAULT = load_targets(os.environ)
     TIMEOUT = int(os.environ.get("TIMEOUT", "300"))
+    COLD_WAIT = int(os.environ.get("COLD_WAIT", "280"))  # below the 300 s gateway deadline
+    WARM_SECONDS = int(os.environ.get("WARM_SECONDS", "300"))  # the idle timeout of the platform
     ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), H).serve_forever()

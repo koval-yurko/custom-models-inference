@@ -1,4 +1,10 @@
-mock_provider "google" {}
+mock_provider "google" {
+  # runpod_registry.tf decodes the key (base64 of "{}").
+  mock_resource "google_service_account_key" {
+    defaults = { private_key = "e30=" }
+  }
+}
+mock_provider "runpod" {}
 mock_provider "google-beta" {
   mock_resource "google_api_gateway_api" {
     defaults = { managed_service = "tts-a-kokoro-cpu-abc.apigateway.p.cloud.goog" }
@@ -6,12 +12,14 @@ mock_provider "google-beta" {
 }
 
 variables {
-  project_id      = "p"
-  billing_account = "000000-000000-000000"
-  hf_token        = "test"
-  runpod_api_key  = "test"
-  slack_bot_token = "test"
-  slack_channel   = "#models"
+  project_id           = "p"
+  billing_account      = "000000-000000-000000"
+  hf_token             = "test"
+  runpod_api_key       = "test"
+  runpod_s3_access_key = "test"
+  runpod_s3_secret_key = "test"
+  slack_bot_token      = "test"
+  slack_channel        = "#models"
 }
 
 run "shared_key_targets_only_the_gateway_apis" {

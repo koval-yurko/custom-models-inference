@@ -20,7 +20,8 @@ module "engine" {
   image      = local.image
   # Vertex AI sets AIP_STORAGE_URI from the model artifactUri.
   args = [for a in concat(var.spec.args, try(var.options.extra_args, [])) : replace(a, "{model}", "$(AIP_STORAGE_URI)")]
-  env  = merge(try(var.spec.env, {}), { HF_HUB_OFFLINE = "1" }, try(var.options.env, {}))
+  # SETUP_PLATFORM: container contract of own images only (the setup record of STT-A).
+  env = merge(try(var.spec.env, {}), { HF_HUB_OFFLINE = "1" }, try(var.spec.image.own, null) != null ? { SETUP_PLATFORM = "vertex" } : {}, try(var.options.env, {}))
 
   port          = try(var.spec.port, 8080)
   health_route  = var.spec.health_route

@@ -86,7 +86,7 @@
 - [ ] **Step 8: Run** `./scripts/check.py infra/modules/cors-proxy`. Expected: `python tests (.)`, `validate` and `test` are `ok`.
 - [ ] **Step 9: Commit** `git commit -m "feat(cors-proxy): several targets routed by the first path segment"`
 
-Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Task 6 (LLM-A). For LLM-B and STT-A, add a one-line change in this task: `targets = { vertex = { url = <their current target>, append_path = <true for /invoke, else false>, auth = "google" } }` and `default_platform = "vertex"`. Their gateways keep their old paths, so their behavior does not change. Run `./scripts/check.py deployments/llm-b-qwen35-9b-fastapi deployments/stt-a-qwen3-asr-diar-vertex`. Expected: all `ok`.
+Note: LLM-A, LLM-B and STT-A still pass `target`. They break `validate` until Task 6 (LLM-A). For LLM-B and STT-A, add a one-line change in this task: `targets = { vertex = { url = <their current target>, append_path = <true for /invoke, else false>, auth = "google" } }` and `default_platform = "vertex"`. Their gateways keep their old paths, so their behavior does not change. Run `./scripts/check.py deployments/llm-b-qwen35-9b-fastapi deployments/stt-a-qwen3-asr-diar`. Expected: all `ok`.
 
 ### Task 3: Gateway module
 

@@ -42,16 +42,18 @@ WORKSPACES = {
     # infra/core. The workspace keeps its old name, so the state stays.
     "custom-models-bootstrap": ("infra/core", {**COMMON, "billing_account": E("BILLING_ACCOUNT"), "budget_amount": E("BUDGET_AMOUNT"),
                                       "hf_token": E("HF_TOKEN"), "runpod_api_key": E("RUNPOD_API_KEY"),
-                                      "slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL")}),
+                                      "slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL"),
+                                      "runpod_s3_access_key": E("RUNPOD_S3_ACCESS_KEY"), "runpod_s3_secret_key": E("RUNPOD_S3_SECRET_KEY")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
     "custom-models-tts-a-kokoro-cpu": ("deployments/tts-a-kokoro-cpu", {**COMMON, "invoker_email": E("INVOKER_EMAIL")}),
     "custom-models-llm-a-gemma4-12b-vllm-vertex": ("deployments/llm-a-gemma4-12b-vllm-vertex", COMMON),
     "custom-models-llm-b-qwen35-9b-fastapi": ("deployments/llm-b-qwen35-9b-fastapi", COMMON),
-    "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar-vertex", COMMON),
+    # STT-A. The folder lost its "-vertex" suffix (it runs on several platforms). The workspace keeps the old name, so the state stays.
+    "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar", COMMON),
 }
 # Env vars for every workspace: the GPU platform providers read their key from it (they fail without one).
 PROVIDER_KEYS = {"RUNPOD_API_KEY": E("RUNPOD_API_KEY")}
-SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
+SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "runpod_s3_access_key", "runpod_s3_secret_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
 
 
 def api(method, path, body=None):

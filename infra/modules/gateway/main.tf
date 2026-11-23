@@ -20,6 +20,13 @@ locals {
     }]...),
   )
 
+  # Path parameters: each {name} in a path (STT-A /v1beta/files/{id}). A path without one gets no parameters key, so
+  # the documents of the other models stay the same (no new API config).
+  params = { for path in keys(merge(local.model_paths, local.extra)) : path => {
+    for k, v in { parameters = [for n in flatten(regexall("{([A-Za-z0-9_]+)}", path)) : { name = n, in = "path", required = true, type = "string" }] } :
+    k => v if length(v) > 0
+  } }
+
   # OpenAPI 2.0. Only the listed paths reach the backends. Every path needs the API key.
   # x-google-backend is on each operation: API Gateway ignores it on a path.
   openapi = {
@@ -32,7 +39,7 @@ locals {
     }
     security = [{ api_key = [] }]
     paths = { for path, e in merge(local.model_paths, local.extra) : path => merge(
-      { for m in e.methods : m => {
+      { for m in e.methods : m => merge(local.params[path], {
         operationId = replace(title(replace("${e.name} ${m}", "/[^a-zA-Z0-9]+/", " ")), " ", "")
         responses   = { "200" = { description = "OK" } }
         x-google-backend = {
@@ -41,10 +48,10 @@ locals {
           # The limit for the whole response.
           deadline = e.deadline
         }
-      } },
+      }) },
       {
         # The browser CORS preflight of the test UI. It has no API key. The backend answers it.
-        options = {
+        options = merge(local.params[path], {
           operationId = replace(title(replace("${e.name} cors", "/[^a-zA-Z0-9]+/", " ")), " ", "")
           security    = []
           responses   = { "200" = { description = "CORS preflight" } }
@@ -53,7 +60,7 @@ locals {
             path_translation = "APPEND_PATH_TO_ADDRESS"
             deadline         = e.deadline
           }
-        }
+        })
       },
     ) }
   }

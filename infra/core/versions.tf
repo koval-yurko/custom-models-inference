@@ -11,6 +11,12 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.10"
     }
+    # The registry credential for own images on Runpod (runpod_registry.tf). It reads RUNPOD_API_KEY from the env
+    # (scripts/hcp-sync.py sets it in the HCP workspace).
+    runpod = {
+      source  = "runpod/runpod"
+      version = "~> 2.0"
+    }
   }
 }
 

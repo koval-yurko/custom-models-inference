@@ -1,13 +1,21 @@
-mock_provider "google" {}
+mock_provider "google" {
+  # runpod_registry.tf decodes the key (base64 of "{}").
+  mock_resource "google_service_account_key" {
+    defaults = { private_key = "e30=" }
+  }
+}
 mock_provider "google-beta" {}
+mock_provider "runpod" {}
 
 variables {
-  project_id      = "p"
-  billing_account = "000000-000000-000000"
-  hf_token        = "test"
-  runpod_api_key  = "test"
-  slack_bot_token = "test"
-  slack_channel   = "#models"
+  project_id           = "p"
+  billing_account      = "000000-000000-000000"
+  hf_token             = "test"
+  runpod_api_key       = "test"
+  runpod_s3_access_key = "test"
+  runpod_s3_secret_key = "test"
+  slack_bot_token      = "test"
+  slack_channel        = "#models"
 }
 
 run "enables_apis_needed_by_first_apply" {
@@ -198,5 +206,32 @@ run "scale_watch" {
   assert {
     condition     = toset([for k, m in google_secret_manager_secret_iam_member.scale_watch : m.secret_id]) == toset(["runpod-api-key"])
     error_message = "the job SA reads only the Runpod key"
+  }
+}
+
+run "runpod_pull_reads_only_the_models_repo" {
+  command = plan
+
+  assert {
+    condition     = google_artifact_registry_repository_iam_member.runpod_pull.role == "roles/artifactregistry.reader" && google_artifact_registry_repository_iam_member.runpod_pull.repository == "models"
+    error_message = "the Runpod pull SA reads the repo models only (not the project)"
+  }
+  assert {
+    condition     = runpod_registry.gcp_models.name == "gcp-models" && runpod_registry.gcp_models.username == "_json_key"
+    error_message = "the platform-runpod adapter finds the credential by the name gcp-models"
+  }
+}
+
+run "runpod_s3_secrets_for_cloud_build_only" {
+  command = plan
+
+
+  assert {
+    condition     = toset(keys(google_secret_manager_secret.runpod_s3)) == toset(["runpod-s3-access-key", "runpod-s3-secret-key"])
+    error_message = "2 secrets for the Runpod S3 API key"
+  }
+  assert {
+    condition     = toset([for m in values(google_secret_manager_secret_iam_member.runpod_s3_cloud_build) : m.role]) == toset(["roles/secretmanager.secretAccessor"]) && length(google_secret_manager_secret_iam_member.runpod_s3_cloud_build) == 2
+    error_message = "the Cloud Build service account may read the 2 secrets (the member is known only after apply)"
   }
 }

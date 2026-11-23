@@ -50,6 +50,8 @@ flowchart LR
     J --> B[("gs://project-models/TARGET_DIR/")]
     B -->|"/models mount"| CR["Cloud Run"]
     B -->|"AIP_STORAGE_URI"| VX["Vertex AI"]
+    B -->|"runpod-weights.py<br/>(S3 API)"| NV[("Runpod network volume")]
+    NV -->|"/runpod-volume"| RP["Runpod worker"]
 ```
 
-`local.model_dir` in a deployment must match `TARGET_DIR` of the job.
+`local.model_dir` in a deployment must match `TARGET_DIR` of the job. A Runpod worker with a volume (STT-A) reads the same folder from `/runpod-volume/<TARGET_DIR>/`. LLM-A on Runpod has no volume: vLLM downloads from Hugging Face at start.

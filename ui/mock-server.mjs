@@ -4,7 +4,7 @@ import http from "node:http";
 import { execFileSync } from "node:child_process";
 // Scores come from the real STT API service code (services/stt_api/stt_api/evaluation, standard library), so the mock
 // and GCP give the same numbers.
-const FILES_DIR = new URL("../deployments/stt-a-qwen3-asr-diar-vertex/services/stt_api/", import.meta.url).pathname;
+const FILES_DIR = new URL("../deployments/stt-a-qwen3-asr-diar/services/stt_api/", import.meta.url).pathname;
 function py(fn, ...args) { // fn(*args) from the evaluation package; a ValueError comes back as {error}
   const code = `import json, sys; sys.path.insert(0, ${JSON.stringify(FILES_DIR)})
 from stt_api.evaluation import reference, scoring
