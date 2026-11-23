@@ -60,7 +60,7 @@ Use for: "what is in each part". One node per part with a short list. Do not put
 ```mermaid
 flowchart LR
     core["<b>infra/core</b><br/>apply once per project<br/>―――<br/>APIs, budget, registry repos<br/>buckets: weights, UI<br/>weights-copy job, hf-token secret<br/>API Gateway APIs, 1 shared API key"]
-    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model-service or vertex-model<br/>gateway.tf<br/>output ui"]
+    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model or model-service<br/>output ui"]
     core -->|"apply first"| dep
 
     classDef layer fill:#f8fafc,stroke:#475569,color:#111

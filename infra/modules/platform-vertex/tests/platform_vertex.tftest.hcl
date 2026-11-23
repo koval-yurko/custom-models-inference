@@ -148,3 +148,73 @@ run "unknown_gpu_fails" {
   }
   expect_failures = [output.target]
 }
+
+# The checks below came with the code of infra/modules/vertex-model (phase 6).
+run "dedicated_private_endpoint" {
+  command = plan
+
+  assert {
+    condition     = google_vertex_ai_endpoint.this.dedicated_endpoint_enabled == true && can(regex("^[1-9][0-9]{0,9}$", google_vertex_ai_endpoint.this.name))
+    error_message = "the endpoint must be dedicated, with a numeric ID (max 10 digits, no leading zero)"
+  }
+  assert {
+    condition     = google_vertex_ai_endpoint.this.network == null && length(google_vertex_ai_endpoint.this.private_service_connect_config) == 0
+    error_message = "no VPC peering or PSC: the endpoint is reached through IAM-checked Vertex AI DNS"
+  }
+  assert {
+    condition     = output.vertex.deployed_model.enableContainerLogging == true && output.vertex.deployed_model.dedicatedResources.initialReplicaCount == 1
+    error_message = "container logs on (scale-alerts reads them); scale to zero needs initialReplicaCount 1"
+  }
+  assert {
+    condition     = length(google_storage_bucket_iam_member.weights) == 1 && google_storage_bucket_iam_member.weights[0].bucket == "p-models" && google_storage_bucket_iam_member.weights[0].role == "roles/storage.objectViewer"
+    error_message = "the model SA reads the weights bucket, and only reads it"
+  }
+  assert {
+    condition     = can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", google_service_account.this.account_id))
+    error_message = "the SA account_id must match the GCP pattern"
+  }
+}
+
+run "long_name_gives_short_sa_id" {
+  command = plan
+
+  variables {
+    options = { name = "a-very-long-model-name-with-more-than-30-chars" }
+  }
+
+  assert {
+    condition     = length(google_service_account.this.account_id) == 30 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", google_service_account.this.account_id))
+    error_message = "a long name gives 25 chars + a hash"
+  }
+}
+
+run "no_weights" {
+  command = plan
+
+  variables {
+    spec = { image = { own = "llm-b:1" }, args = [], health_route = "/health", routes = ["/x"], gpu = "L4" }
+  }
+
+  assert {
+    condition     = output.vertex.model_upload.model.artifactUri == null && length(google_storage_bucket_iam_member.weights) == 0
+    error_message = "no artifactUri and no bucket IAM without weights"
+  }
+}
+
+run "rejects_aip_env" {
+  command = plan
+
+  variables {
+    options = { name = "llm-a-gemma4-12b-vllm", env = { AIP_HTTP_PORT = "9000" } }
+  }
+  expect_failures = [google_vertex_ai_endpoint.this]
+}
+
+run "rejects_idle_below_300s" {
+  command = plan
+
+  variables {
+    spec = { image = { own = "llm-b:1" }, args = [], health_route = "/health", routes = ["/x"], gpu = "L4", idle_seconds = 60 }
+  }
+  expect_failures = [google_vertex_ai_endpoint.this]
+}

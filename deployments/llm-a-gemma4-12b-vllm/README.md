@@ -112,6 +112,10 @@ Do these steps after the first plan below and the "Test UI and platforms" steps.
 
 The first cold call did not get a `429`: Runpod holds a request at 0 workers (182 s here). The 429 mapping in the proxy stays as a guard for a "no workers available" answer. The gateway deadline is 300 s, so a cold start that takes longer than about 5 minutes gets a gateway timeout. Then send the call again: the worker is still starting.
 
+## Next plan after the vertex-model merge (2026-11-24)
+
+The code of `infra/modules/vertex-model` moved into `infra/modules/platform-vertex` (its `moved.tf`). So the next plan shows 3 moves, from `module.model.module.vertex[0].module.engine.<resource>` to `module.model.module.vertex[0].<resource>`: the endpoint, its service account and the bucket IAM member. Nothing is added, changed or destroyed for them. If the plan shows a replace of `google_vertex_ai_endpoint`, stop and check `moved.tf` against `terraform state list`.
+
 ## First plan after the move to the model module (2026-11-22)
 
 The resources moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` into `infra/modules/model` (`moved.tf`). Run a plan before the first apply after this change:

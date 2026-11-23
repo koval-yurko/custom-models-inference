@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-apply step: upload and deploy (or undeploy and delete) the model of a vertex-model deployment.
+"""Post-apply step: upload and deploy (or undeploy and delete) the Vertex AI model of a deployment.
 
 Run from anywhere:  ./scripts/vertex.py deploy|undeploy deployments/<name>   (loads the repo .env itself; no direnv needed)
 For a deployment on infra/modules/model (it has a targets output), use ./scripts/deploy.py instead.

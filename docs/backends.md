@@ -2,9 +2,9 @@
 
 Both are private and scale to zero. Pick one when you add a model.
 
-| | Cloud Run (`model-service`) | Vertex AI (`vertex-model`) |
+| | Cloud Run (`model-service`) | Vertex AI (`model`, adapter `platform-vertex`) |
 |---|---|---|
-| Used for | TTS Kokoro (CPU), the STT-A files service (CPU) | LLM Gemma 4, LLM-B Qwen3.5, STT-A Qwen3-ASR + Pyannote (1 L4 GPU each; LLM-A and STT-A also on Runpod) |
+| Used for | TTS Kokoro (CPU), the STT-A files service (CPU) | LLM Gemma 4, LLM-B Qwen3.5, STT-A Qwen3-ASR + Pyannote (1 L4 GPU each; all 3 also on Runpod) |
 | Created by | Terraform only | Terraform (endpoint) + `deploy.py deploy` or `vertex.py deploy` (model) |
 | Weights | Read-only mount at `/models` | The container reads `$AIP_STORAGE_URI` |
 | Image source | `ghcr` or `models` repo | `dockerhub` proxy repo (Vertex AI pulls only from Artifact Registry) |

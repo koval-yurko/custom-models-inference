@@ -1,14 +1,14 @@
-# LLM-B on Vertex AI: Qwen3.5-9B FP8 in an own FastAPI + vLLM image, 1 L4
+# LLM-B: Qwen3.5-9B FP8 in an own FastAPI + vLLM image, on Vertex AI and Runpod
 
-First custom container of the module `infra/modules/vertex-model` (see `infra/README.md`, section "Module: vertex-model").
+The deployment calls the module `infra/modules/model` with `platforms = ["vertex", "runpod"]` (see `infra/README.md`, section "Module: model (platforms)"). Vertex AI is the default platform for the old paths.
 
 - Model `RedHatAI/Qwen3.5-9B-FP8-dynamic` (Apache 2.0, about 14 GB with the MTP and vision files). Qwen publishes no FP8 build of the 9B model. The Red Hat build is the FP8 build that vLLM documents, and it has the most downloads.
-- Image `image/`: `FROM vllm/vllm-openai:v0.33.0` and `app.py`. `app.py` is a FastAPI app that runs the vLLM engine (`AsyncLLM`, the v1 `AsyncLLMEngine`) in the same process. Uvicorn runs 1 process.
-- Private Vertex AI endpoint in `us-central1`: `g2-standard-8`, 1 `NVIDIA_L4`. It scales to zero (max 1 replica, idle time 300 s).
-- Weights: `gs://<project_id>-models/qwen3.5-9b-fp8/`. Vertex AI gives the path to the container as `AIP_STORAGE_URI`. vLLM streams the weights from GCS (`runai_streamer`).
-- Routes: `invoke_routes = true`, so `:invoke` reaches every route of `app.py`. `:predict` and `:rawPredict` are off.
-- Public API Gateway `llm-b-qwen35-fastapi` checks `x-api-key` and lets through only `POST /generate` and `POST /extract`. Behind it, the private Cloud Run service `llm-b-qwen35-fastapi-proxy` (`cors_proxy.tf`) forwards each call to `<endpoint>/invoke/<route>` and adds CORS headers. The test UI has a tab for it (type `llm-routes`).
-- Direct calls to the endpoint need `aiplatform.endpoints.predict` on the project.
+- Image `image/`: `FROM vllm/vllm-openai:v0.33.0` and `app.py`. `app.py` is a FastAPI app that runs the vLLM engine (`AsyncLLM`, the v1 `AsyncLLMEngine`) in the same process. Uvicorn runs 1 process. It follows the container contract: it reads `PORT` (else `AIP_HTTP_PORT`, else 8080) and `MODEL` (else `AIP_STORAGE_URI`).
+- Vertex AI: private dedicated endpoint in `us-central1`, `g2-standard-8`, 1 `NVIDIA_L4`, 0 to 1 replica, 300 s idle time. Vertex AI gives the weights path as `AIP_STORAGE_URI` (`gs://<project_id>-models/qwen3.5-9b-fp8/`), and vLLM streams the weights from GCS (`runai_streamer`). The KV cache is FP8.
+- Runpod (since 2026-11-24): 1 load balancing endpoint `llm-b-qwen35-9b-fastapi`, pools `AMPERE_24` and `ADA_24` (24 GB GPUs: L4, A5000, 3090, 4090), 0 to 1 worker, 300 s idle time. The image comes from the `models` repo with the `infra/core` registry credential `gcp-models`. The weights are on 3 network volumes (`EU-RO-1`, `EUR-IS-1`, `EU-CZ-1`, 40 GB each: the S3 copy needs about 2 times the largest file, see below) at `/runpod-volume/qwen3.5-9b-fp8` (env `MODEL`). `scripts/runpod-weights.py` copies them there from GCS. The KV cache uses the model dtype (`KV_CACHE_DTYPE=auto`), because Ampere has no native FP8. vLLM runs the FP8 weights on Ampere as W8A16.
+- Vertex AI routes: no `predict_route`, so `:invoke` reaches every route of `app.py`. `:predict` and `:rawPredict` are off.
+- Public API Gateway `llm-b-qwen35-fastapi` checks `x-api-key` and lets through only `POST /generate` and `POST /extract`. Each path is there 3 times: the old path (Vertex AI), `/vertex/...` and `/runpod/...`. Behind it, the private Cloud Run service `llm-b-qwen35-fastapi-proxy` forwards each call to the platform and adds CORS headers. The test UI has a tab for it (type `llm-routes`) with a platform picker.
+- Direct calls to the Vertex AI endpoint need `aiplatform.endpoints.predict` on the project.
 
 | Route | Body | Answer |
 |---|---|---|
@@ -16,61 +16,83 @@ First custom container of the module `infra/modules/vertex-model` (see `infra/RE
 | `POST /generate` | `{"prompt": "...", "max_tokens": 512, "temperature": 0.7}` | `{"text": "..."}` |
 | `POST /extract` | `{"text": "...", "schema": {...}, "max_tokens": 1024}` | `{"data": {...}}`: JSON that matches the schema. vLLM structured outputs force the format. Without `schema`, the app uses its default schema (people, organizations, places, dates). |
 
-Both POST routes use the chat template with thinking off. Settings come from env values in `main.tf`: `SERVED_MODEL_NAME`, `MAX_MODEL_LEN` (16384).
+Both POST routes use the chat template with thinking off. Settings come from env values in `main.tf`: `SERVED_MODEL_NAME`, `MAX_MODEL_LEN` (16384), `KV_CACHE_DTYPE` (default `fp8`; `auto` on Runpod).
 
 ## Deploy
 
-Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway API `llm-b-qwen35-fastapi`. Run the commands from the repo root.
+Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway API `llm-b-qwen35-fastapi`, and its `runpod_registry.tf` has the registry credential `gcp-models`. Run the commands from the repo root.
 
-0. Sync the HCP workspace (new: `custom-models-llm-b-qwen35-9b-fastapi`). Then check the weights folder and the L4 quota. Fix every FAIL. The weights check fails until step 1 is done.
+0. Sync the HCP workspace (`custom-models-llm-b-qwen35-9b-fastapi`). Then check the weights folder and the L4 quota. Fix every FAIL. The weights check fails until step 1 is done.
    ```sh
    ./scripts/hcp-sync.py
    ./scripts/preflight.py --weights qwen3.5-9b-fp8 --l4
    ```
-1. Copy the weights (13 GiB, about 9 minutes). Skip this step when the folder already has files.
+1. Copy the weights to GCS (13 GiB, about 9 minutes). Skip this step when the folder already has files.
    ```sh
    gcloud storage ls gs://$GCP_PROJECT_ID-models/qwen3.5-9b-fp8/
    gcloud run jobs execute weights-copy --wait \
      --update-env-vars HF_REPO=RedHatAI/Qwen3.5-9B-FP8-dynamic,TARGET_DIR=qwen3.5-9b-fp8
    ```
-2. Build the image with Cloud Build (about 14 minutes). It pushes to the `models` repo. The tag must be the same as `image_tag` in `variables.tf`.
+2. Build the image with Cloud Build (about 14 minutes). It pushes to the `models` repo. The tag must be the same as `image_tag` in `variables.tf`. Build before the apply: Runpod checks at create that the template image exists.
    ```sh
    gcloud builds submit deployments/llm-b-qwen35-9b-fastapi/image \
      --config=deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.1.1 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.0 --region=$GCP_REGION
    ```
-3. Apply. It makes the endpoint, the gateway and the CORS proxy.
+3. Apply. It makes the Vertex AI endpoint, the Runpod volumes, template and endpoint, the CORS proxy and the gateway.
    ```sh
    cd deployments/llm-b-qwen35-9b-fastapi && terraform init && terraform apply && cd ../..
    ```
-4. Upload and deploy the model. It takes up to 45 minutes.
+4. Copy the weights from GCS to the 3 Runpod volumes (Cloud Build job; see `infra/README.md`, section "Copy weights to a Runpod volume"). Do this before the first `/runpod/` call.
    ```sh
-   ./scripts/vertex.py deploy deployments/llm-b-qwen35-9b-fastapi
+   ./scripts/runpod-weights.py deployments/llm-b-qwen35-9b-fastapi --dry-run
+   ./scripts/runpod-weights.py deployments/llm-b-qwen35-9b-fastapi --cloud
    ```
-5. Update the test UI (new tab, new panel code).
+5. Upload and deploy the Vertex AI model. It takes up to 45 minutes. Runpod has no step here: its endpoint is ready after the apply.
+   ```sh
+   ./scripts/deploy.py deploy deployments/llm-b-qwen35-9b-fastapi
+   ./scripts/deploy.py status deployments/llm-b-qwen35-9b-fastapi   # vertex: deployed, runpod: deployed
+   ```
+6. Update the test UI (the tab gets the platform picker).
    ```sh
    ./scripts/ui-deploy.py
    ```
 
-To change the code: raise `image_tag` in `variables.tf`, build with the new `_TAG`, run `./scripts/vertex.py undeploy deployments/llm-b-qwen35-9b-fastapi`, then `terraform apply`, then `vertex.py deploy`.
-Do this once for a model deployed before 2026-11-20: it has container logs off, and the Slack alerts need them.
+To change the code: raise `image_tag` in `variables.tf` and build with the new `_TAG`. Run `./scripts/deploy.py undeploy deployments/llm-b-qwen35-9b-fastapi --platform vertex`, then `terraform apply` (it replaces the Runpod endpoint: a new image changes the template), then `./scripts/deploy.py deploy deployments/llm-b-qwen35-9b-fastapi`.
 
-## Next plan after the proxy change (2026-11-23)
+## First plan after the move to the model module (2026-11-24)
 
-The shared file `infra/modules/cors-proxy/cors_proxy.py` changed (it maps the Runpod "no workers available" answer to 429). So the next plan of this deployment shows 1 in-place update of the proxy Cloud Run service `llm-b-qwen35-fastapi-proxy`: only its `args` change. This is expected. Nothing else changes, and the deployed model stays the same.
+The resources moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` into `infra/modules/model` (`moved.tf`, and `infra/modules/platform-vertex/moved.tf` for the last step). Build the image `0.2.0` first (step 2). Then run a plan and read it before you apply:
+
+```sh
+cd deployments/llm-b-qwen35-9b-fastapi && terraform init && terraform plan
+```
+
+Expected:
+
+- Moves only (`has moved to`): the endpoint, its service account and bucket IAM member, the CORS proxy module, the gateway service account, the API config, the gateway, and `module.scale_alerts` to `module.scale_alerts[0]`. If the state still has `google_project_iam_member.predict` without an index, it also moves to `predict[0]` (a `moved` block of the proxy module).
+- A new API config (the paths `/vertex/...` and `/runpod/...`, and `x-google-backend` on each operation), the old API config destroyed after it, and the gateway updated in place.
+- An in-place update of the proxy service `llm-b-qwen35-fastapi-proxy` (env `TARGETS`, the Runpod key secret, the timeout).
+- New: 3 Runpod volumes, the Runpod template and endpoint, the `secretAccessor` member of the proxy SA on the secret `runpod-api-key`, and the Runpod Slack alerts (`module.platform_alerts["runpod"]`).
+- No replace of `google_vertex_ai_endpoint`, `google_api_gateway_gateway` or a service account. If the plan shows one, stop and check `moved.tf` against `terraform state list`.
+
+After the apply, do steps 4 to 6 of [Deploy](#deploy). The deployed Vertex AI model keeps the image `0.1.1` until the next `undeploy` and `deploy`; `0.1.1` works on Vertex AI.
 
 ## Test
 
-At 0 replicas the first call returns HTTP 429. The loop sends the call again every 30 s, for at most 30 minutes. It prints the time to the first `200`: this is the cold start.
+Warning: a call at 0 replicas starts a GPU (Vertex AI: an L4 at about $1 per hour; Runpod: billed per second until the 300 s idle time ends).
+
+At 0 replicas, Vertex AI returns HTTP 429 at once. Runpod holds the call while a worker starts; when no answer comes in 280 s, the proxy answers `429`. The loop sends the call again every 30 s, for at most 30 minutes. It prints the time to the first `200`: this is the cold start.
 
 ```sh
 cd deployments/llm-b-qwen35-9b-fastapi
-BASE="https://$(terraform output -raw endpoint_dns)/v1/projects/$GCP_PROJECT_ID/locations/$GCP_REGION/endpoints/$(terraform output -raw endpoint_id)"
-TOKEN=$(gcloud auth print-access-token)
+GW=$(terraform output -raw gateway_url)
+KEY=$(terraform -chdir=../../infra/core output -raw api_key)
+P=runpod   # or vertex
 start=$(date +%s)
 for i in $(seq 1 60); do
-  code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST "$BASE/invoke/extract" \
-    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST "$GW/$P/extract" \
+    -H "x-api-key: $KEY" -H "Content-Type: application/json" \
     -d '{"text":"Ada Lovelace met Charles Babbage in London on 5 June 1833. Both later worked with the Royal Society."}')
   [ "$code" != 429 ] && break
   sleep 30
@@ -78,15 +100,23 @@ done
 echo "$code after $(( $(date +%s) - start )) s"; python3 -m json.tool /tmp/out.json
 ```
 
-Expected: `200` and valid JSON, for example `{"data": {"people": ["Ada Lovelace", "Charles Babbage"], "organizations": ["Royal Society"], ...}}`.
+Expected: `200` and valid JSON, for example `{"data": {"people": ["Ada Lovelace", "Charles Babbage"], "organizations": ["Royal Society"], ...}}`. A `504` means the gateway deadline (300 s) passed while a request ran: send the call again.
 
 Own schema and `/generate`:
 
 ```sh
-curl -s -X POST "$BASE/invoke/extract" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -s -X POST "$GW/$P/extract" -H "x-api-key: $KEY" -H "Content-Type: application/json" \
   -d '{"text":"Order 42: 3 red chairs, total 120 EUR.","schema":{"type":"object","properties":{"order_id":{"type":"integer"},"items":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"qty":{"type":"integer"}},"required":["name","qty"]}},"total":{"type":"number"},"currency":{"type":"string"}},"required":["order_id","items","total","currency"]}}'
-curl -s -X POST "$BASE/invoke/generate" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -s -X POST "$GW/$P/generate" -H "x-api-key: $KEY" -H "Content-Type: application/json" \
   -d '{"prompt":"Say hello in 5 words.","max_tokens":32}'
+```
+
+Direct call to the Vertex AI endpoint (no gateway):
+
+```sh
+BASE="https://$(terraform output -raw endpoint_dns)/v1/projects/$GCP_PROJECT_ID/locations/$GCP_REGION/endpoints/$(terraform output -raw endpoint_id)"
+curl -s -X POST "$BASE/invoke/generate" -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" -d '{"prompt":"Say hello in 5 words.","max_tokens":32}'
 ```
 
 ## Cold start
@@ -107,14 +137,14 @@ Slack: after a cold start, the channel gets `🟢 LLM-B Qwen3.5 9B is ready`. Af
 
 ## Destroy
 
-Undeploy first. Vertex AI does not delete an endpoint that has a deployed model.
+Undeploy the Vertex AI model first. Vertex AI does not delete an endpoint that has a deployed model.
 
 ```sh
-./scripts/vertex.py undeploy deployments/llm-b-qwen35-9b-fastapi
+./scripts/deploy.py undeploy deployments/llm-b-qwen35-9b-fastapi --platform vertex
 cd deployments/llm-b-qwen35-9b-fastapi && terraform destroy
 ```
 
-The weights and the image stay. Delete the image with `gcloud artifacts docker images delete $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models/llm-b-qwen35-9b-fastapi --delete-tags`.
+The destroy also deletes the 3 Runpod volumes and their weights. The GCS weights and the image stay. Delete the image with `gcloud artifacts docker images delete $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models/llm-b-qwen35-9b-fastapi --delete-tags`.
 
 ## Verified on 2026-11-14
 

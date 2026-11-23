@@ -1,4 +1,5 @@
-"""LLM-B: own FastAPI app with the vLLM engine (AsyncLLM) in the same process. Vertex AI custom container.
+"""LLM-B: own FastAPI app with the vLLM engine (AsyncLLM) in the same process. Runs on Vertex AI and Runpod
+(container contract of docs/specs/2026-11-22-multi-platform-design.md: PORT and MODEL, with the AIP_ values as fallback).
 
 Routes (through :invoke, <base>/invoke/<route>):
   GET  /health    200 when the engine is ready, 503 while it loads or after it failed
@@ -22,8 +23,9 @@ from vllm import AsyncEngineArgs, SamplingParams
 from vllm.sampling_params import StructuredOutputsParams
 from vllm.v1.engine.async_llm import AsyncLLM  # what vllm.AsyncLLMEngine points to in vLLM v1
 
-# Vertex AI sets AIP_STORAGE_URI (gs://...) from the model artifactUri. MODEL is for a local run with a local folder.
-MODEL = os.environ.get("AIP_STORAGE_URI") or os.environ["MODEL"]
+# MODEL (container contract) wins: a local folder (Runpod network volume, a local run) or a gs:// URI.
+# Else AIP_STORAGE_URI: Vertex AI sets it (gs://...) from the model artifactUri.
+MODEL = os.environ.get("MODEL") or os.environ["AIP_STORAGE_URI"]
 
 ENGINE_ARGS = AsyncEngineArgs(
     model=MODEL,
@@ -31,7 +33,8 @@ ENGINE_ARGS = AsyncEngineArgs(
     # Streams the safetensors from GCS to the GPU. A local folder loads as usual.
     load_format="runai_streamer" if MODEL.startswith("gs://") else "auto",
     max_model_len=int(os.environ.get("MAX_MODEL_LEN", "16384")),
-    kv_cache_dtype="fp8",
+    # fp8 needs native FP8 (L4, Ada). The Runpod adapter sets "auto": its pool also has Ampere GPUs (A5000, 3090).
+    kv_cache_dtype=os.environ.get("KV_CACHE_DTYPE", "fp8"),
     # Qwen3.5 is an image-text model. Text only: no vision encoder on the GPU, more room for the KV cache.
     language_model_only=True,
 )
@@ -141,4 +144,6 @@ async def extract(body: ExtractIn):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("AIP_HTTP_PORT", "8080")), workers=1)
+    # PORT (container contract, the Runpod adapter sets it), else AIP_HTTP_PORT (Vertex AI), else 8080.
+    port = int(os.environ.get("PORT") or os.environ.get("AIP_HTTP_PORT") or "8080")
+    uvicorn.run(app, host="0.0.0.0", port=port, workers=1)

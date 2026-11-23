@@ -110,15 +110,15 @@ class S3:
         self.region, self.bucket, self.access, self.secret = data_center, bucket, access, secret
         self.host = f"s3api-{data_center.lower()}.runpod.io"
 
-    def call(self, method, key, query=None, body=b"", headers=None):
-        path = "/" + quote(f"{self.bucket}/{key}", safe="/-_.~")
+    def call(self, method, key, query=None, body=b"", headers=None, timeout=600):
+        path = "/" + quote(f"{self.bucket}/{key}" if key else self.bucket, safe="/-_.~")  # key "": the bucket itself
         query = query or {}
         signed = sign_v4(method, self.host, path, query, headers or {}, hashlib.sha256(body).hexdigest(),
                          self.access, self.secret, self.region, datetime.datetime.now(datetime.timezone.utc))
         url = f"https://{self.host}{path}" + (f"?{urlencode(query)}" if query else "")
         req = urllib.request.Request(url, data=body if method in ("PUT", "POST") else None,
                                      headers={**signed, "User-Agent": USER_AGENT}, method=method)
-        return urllib.request.urlopen(req, timeout=600)
+        return urllib.request.urlopen(req, timeout=timeout)
 
     def size(self, key):
         """Size of an object on the volume, or None when it is not there."""
@@ -133,8 +133,21 @@ class S3:
     def put(self, key, data):
         self.call("PUT", key, body=data).close()
 
-    def multipart(self, key, chunks):
-        """Upload the chunks (bytes, in order) as 1 object. Abort the upload on any error."""
+    def abort_open(self, key):
+        """Abort the open uploads of key. A stopped run (a Cloud Build step ends when another fails) leaves its parts
+        on the volume, and they fill it: Runpod then answers 403. Runpod lists the keys with a leading /."""
+        with self.call("GET", "", {"uploads": "", "prefix": key}) as r:
+            root = ElementTree.fromstring(r.read())
+        for up in (e for e in root.iter() if e.tag.rsplit("}", 1)[-1] == "Upload"):
+            k = next(c.text for c in up if c.tag.rsplit("}", 1)[-1] == "Key").lstrip("/")
+            u = next(c.text for c in up if c.tag.rsplit("}", 1)[-1] == "UploadId")
+            if k == key:
+                print(f"    abort an old upload of {k}", flush=True)
+                self.call("DELETE", k, {"uploadId": u}).close()
+
+    def multipart(self, key, chunks, size=None):
+        """Upload the chunks (bytes, in order) as 1 object of size bytes. Abort the upload on any error."""
+        self.abort_open(key)
         with self.call("POST", key, {"uploads": ""}) as r:
             upload = _xml_text(r.read(), "UploadId")
         try:
@@ -144,13 +157,34 @@ class S3:
                     with self.call("PUT", key, {"partNumber": n, "uploadId": upload}, data) as r:
                         return r.headers["ETag"]
                 etags.append(retry(put_part, f"part {n}"))
-            body = complete_xml(etags)
-            self.call("POST", key, {"uploadId": upload}, body, {"content-type": "application/xml"}).close()
+            self.complete(key, upload, complete_xml(etags), size)
         except BaseException:
             try:
                 self.call("DELETE", key, {"uploadId": upload}).close()
             finally:
                 raise
+
+
+    def complete(self, key, upload, body, size, wait=60):
+        """CompleteMultipartUpload. For a big file Runpod can answer an error or time out while it still joins the
+        parts (seen: 403 after 845 parts of 13.5 GB; the Runpod docs warn about 10 GB and more). So after an error,
+        wait and accept the object when HEAD shows its full size. Else try again with a longer wait and timeout."""
+        for attempt in range(TRIES):
+            try:
+                self.call("POST", key, {"uploadId": upload}, body, {"content-type": "application/xml"},
+                          timeout=600 * 2 ** attempt).close()
+                return
+            except NET_ERRORS as e:
+                print(f"    complete: {e}; check the object in {wait} s", flush=True)
+                time.sleep(wait)
+                try:
+                    if size is not None and self.size(key) == size:
+                        return
+                except NET_ERRORS as e2:
+                    print(f"    complete: HEAD failed: {e2}", flush=True)
+                if attempt == TRIES - 1:
+                    raise
+                wait *= 2
 
 
 def _xml_text(data, tag):
@@ -286,7 +320,7 @@ def copy_volume(vol, folder, src, dry_run, access, secret):
             data = next(parts, b"")
             retry(lambda: s3.put(key(n), data), n)
         else:
-            s3.multipart(key(n), parts)
+            s3.multipart(key(n), parts, s)
         if s3.size(key(n)) != s:
             sys.exit(f"{n}: the size on the volume is not {s} bytes after the copy")
     print(f"done {vol['data_center']}: {0 if dry_run else len(todo)} copied, {len(objects) - len(todo)} skipped "

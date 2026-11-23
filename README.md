@@ -16,7 +16,7 @@ A GPU replica costs about $1.34 per hour while it runs. A budget alert does not 
 | Folder | Content |
 |---|---|
 | `infra/core/` | Shared setup. Apply it once per project. It makes the APIs, the buckets, the Artifact Registry repos, the budget, the `weights-copy` job, the API Gateway APIs, the shared API key and the `cors-preflight` service. |
-| `infra/modules/` | `model-service` (Cloud Run), `vertex-model` (Vertex AI) and `cors-proxy` (CORS for Vertex AI gateways). Deployments use them. |
+| `infra/modules/` | `model` (1 GPU model on Vertex AI and Runpod, with its CORS proxy and gateway) and `model-service` (Cloud Run). Deployments use them. |
 | `deployments/<name>/` | One folder and one state per model. It has the image, the flags and the gateway. |
 | `scripts/` | Python helpers: `check.py`, `preflight.py`, `hcp-sync.py`, `deploy.py`, `vertex.py`, `gateway-streaming.py`, `ui-deploy.py`, `verify-ui.py`, `verify-gcp.py`. |
 | `ui/` | The test UI (React and Vite). |

@@ -25,7 +25,7 @@ Only the gateway is public. Every backend is private and scales to zero. Dashed 
 ```mermaid
 flowchart LR
     core["<b>infra/core</b><br/>apply once per project<br/>―――<br/>APIs, budget, registry repos<br/>buckets: weights, UI<br/>weights-copy job, hf-token secret<br/>API Gateway APIs, 1 shared API key<br/>Slack channel models-slack"]
-    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model, model-service or vertex-model<br/>alerts.tf, output ui"]
+    dep["<b>deployments/#lt;name#gt;</b><br/>one folder and one state per model<br/>―――<br/>module model or model-service<br/>alerts.tf, output ui"]
     core -->|"apply first"| dep
 
     classDef layer fill:#f8fafc,stroke:#475569,color:#111
@@ -35,7 +35,7 @@ flowchart LR
 | Folder | Content |
 |---|---|
 | `infra/core/` | Shared setup. Apply once. |
-| `infra/modules/` | `model` (1 model on a list of platforms, with `platform-vertex`, `gateway`, `cors-proxy`), `model-service` (Cloud Run), `vertex-model` (Vertex AI), `scale-alerts` (Slack) |
+| `infra/modules/` | `model` (1 model on a list of platforms, with `platform-vertex`, `platform-runpod`, `gateway`, `cors-proxy`), `model-service` (Cloud Run), `scale-alerts` (Slack) |
 | `deployments/<name>/` | One model: image, flags, gateway, Slack alerts |
 | `scripts/` | Python helpers |
 | `ui/` | React test UI |

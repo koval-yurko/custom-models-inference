@@ -140,6 +140,10 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```
 6. Test the new routes through the gateway: see [Test](#test) and [Evaluation](#evaluation).
 
+## Next plan after the vertex-model merge (2026-11-24)
+
+The code of `infra/modules/vertex-model` moved into `infra/modules/platform-vertex` (its `moved.tf`). So the next plan shows 3 moves, from `module.model.module.vertex[0].module.engine.<resource>` to `module.model.module.vertex[0].<resource>`: the endpoint, its service account and the bucket IAM member. Nothing is added, changed or destroyed for them. If the plan shows a replace of `google_vertex_ai_endpoint`, stop and check `moved.tf` against `terraform state list`.
+
 ## First plan after the move to Runpod (2026-11-23)
 
 This deployment moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` to the module `infra/modules/model` (plan: [`docs/specs/2026-11-23-stt-a-runpod-plan.md`](../../docs/specs/2026-11-23-stt-a-runpod-plan.md)). `moved.tf` keeps every resource. Read the first plan before you apply. Expected:

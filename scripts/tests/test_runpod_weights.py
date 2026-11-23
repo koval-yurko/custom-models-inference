@@ -76,16 +76,22 @@ class Cloud(unittest.TestCase):
 
 
 class FakeS3(rw.S3):
-    """Records the calls. The 2nd part fails."""
+    """Records the calls. The part fail_part fails."""
+    fail_part = 2
+    listing = b"<ListMultipartUploadsResult/>"
 
     def __init__(self):
         super().__init__("EU-RO-1", "vol1", "a", "s")
         self.calls = []
 
-    def call(self, method, key, query=None, body=b"", headers=None):
+    def call(self, method, key, query=None, body=b"", headers=None, timeout=600):
         self.calls.append((method, dict(query or {})))
-        if query and query.get("partNumber") == 2:
+        if query and self.fail_part is not None and query.get("partNumber") == self.fail_part:
             raise OSError("network")
+        if query and "uploads" in query and method == "GET":  # ListMultipartUploads
+            r = io.BytesIO(self.listing)
+            r.headers = {}
+            return r
         r = io.BytesIO(b"<R><UploadId>u1</UploadId></R>")
         r.headers = {"ETag": '"e"'}
         return r
@@ -96,18 +102,70 @@ class Multipart(unittest.TestCase):
         s3 = FakeS3()
         with self.assertRaises(OSError):
             s3.multipart("d/f", iter([b"a", b"b"]))
-        self.assertEqual([c[0] for c in s3.calls], ["POST", "PUT", "PUT", "DELETE"])
+        self.assertEqual([c[0] for c in s3.calls], ["GET", "POST", "PUT", "PUT", "DELETE"])
+
+    def test_old_upload_of_the_same_key_is_aborted_first(self):
+        s3 = FakeS3()
+        s3.fail_part = None
+        s3.listing = (b"<R><Upload><Key>/d/f</Key><UploadId>old</UploadId></Upload>"
+                      b"<Upload><Key>/d/f2</Key><UploadId>other</UploadId></Upload></R>")
+        s3.multipart("d/f", iter([b"a"]))
+        self.assertEqual(s3.calls[:2], [("GET", {"uploads": "", "prefix": "d/f"}), ("DELETE", {"uploadId": "old"})])
+        self.assertNotIn(("DELETE", {"uploadId": "other"}), s3.calls)  # d/f2 is another file
         self.assertEqual(s3.calls[-1][1], {"uploadId": "u1"})
 
 
 class FlakyS3(FakeS3):
     """Part 1 fails once with a connection error, then works."""
 
-    def call(self, method, key, query=None, body=b"", headers=None):
+    def call(self, method, key, query=None, body=b"", headers=None, timeout=600):
         if query and query.get("partNumber") == 1 and not any(c[1].get("partNumber") == 1 for c in self.calls):
             self.calls.append((method, dict(query)))
             raise ConnectionError("broken pipe")
+        return super().call(method, key, query, body, headers, timeout)
+
+
+class CompleteFails(FakeS3):
+    """All parts work. CompleteMultipartUpload answers 403 (seen on Runpod for a big file) fails times. HEAD gives head_size."""
+    fail_part = None
+
+    def __init__(self, fails, head_size):
+        super().__init__()
+        self.fails, self.head_size = fails, head_size
+
+    def call(self, method, key, query=None, body=b"", headers=None, timeout=600):
+        if method == "POST" and query and "uploadId" in query:
+            self.calls.append((method, dict(query)))
+            if self.fails > 0:
+                self.fails -= 1
+                raise rw.urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+            r = io.BytesIO(b"")
+            r.headers = {}
+            return r
         return super().call(method, key, query, body, headers)
+
+    def size(self, key):
+        return self.head_size
+
+
+class Complete(unittest.TestCase):
+    def test_error_on_complete_but_object_is_whole(self):
+        s3 = CompleteFails(fails=5, head_size=2)
+        with unittest.mock.patch.object(rw.time, "sleep"):
+            s3.multipart("d/f", iter([b"a", b"b"]), 2)
+        self.assertNotIn("DELETE", [c[0] for c in s3.calls])  # no abort: the parts became the object
+
+    def test_complete_is_sent_again_until_it_works(self):
+        s3 = CompleteFails(fails=2, head_size=None)
+        with unittest.mock.patch.object(rw.time, "sleep"):
+            s3.multipart("d/f", iter([b"a", b"b"]), 2)
+        self.assertEqual([c[0] for c in s3.calls].count("POST"), 1 + 3)  # create + 3 completes
+
+    def test_gives_up_and_aborts(self):
+        s3 = CompleteFails(fails=99, head_size=1)
+        with unittest.mock.patch.object(rw.time, "sleep"), self.assertRaises(rw.urllib.error.HTTPError):
+            s3.multipart("d/f", iter([b"a", b"b"]), 2)
+        self.assertEqual(s3.calls[-1][0], "DELETE")
 
 
 class Retry(unittest.TestCase):
@@ -115,7 +173,7 @@ class Retry(unittest.TestCase):
         s3 = FlakyS3()
         with unittest.mock.patch.object(rw.time, "sleep"):
             s3.multipart("d/f", iter([b"a"]))
-        self.assertEqual([c[0] for c in s3.calls], ["POST", "PUT", "PUT", "POST"])
+        self.assertEqual([c[0] for c in s3.calls], ["GET", "POST", "PUT", "PUT", "POST"])
 
 
 if __name__ == "__main__":

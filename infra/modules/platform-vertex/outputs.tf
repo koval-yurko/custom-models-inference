@@ -1,5 +1,5 @@
 locals {
-  base = "https://${module.engine.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${module.engine.endpoint_id}"
+  base = "https://${local.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${google_vertex_ai_endpoint.this.name}"
 }
 
 output "target" {
@@ -17,27 +17,37 @@ output "target" {
   }
 
   precondition {
-    condition     = local.gpu == null || contains(keys(local.accelerator), coalesce(local.gpu, "-"))
+    condition     = local.gpu == null || contains(keys(local.accelerators), coalesce(local.gpu, "-"))
     error_message = "spec.gpu must be \"L4\" or null on Vertex AI."
   }
 }
 
 output "vertex" {
   description = "Input for scripts/platforms/vertex.py."
-  value       = module.engine.vertex
+  value = {
+    project        = var.project_id
+    region         = var.region
+    endpoint       = google_vertex_ai_endpoint.this.id
+    endpoint_dns   = local.endpoint_dns
+    name           = local.name
+    invoke_routes  = local.invoke_routes
+    predict_route  = local.predict_route
+    model_upload   = local.model_upload
+    deployed_model = local.deployed_model
+  }
 }
 
 output "endpoint_id" {
   description = "Numeric endpoint ID."
-  value       = module.engine.endpoint_id
+  value       = google_vertex_ai_endpoint.this.name
 }
 
 output "endpoint_dns" {
   description = "Dedicated endpoint DNS."
-  value       = module.engine.endpoint_dns
+  value       = local.endpoint_dns
 }
 
 output "service_account_email" {
   description = "Service account the deployed model runs as."
-  value       = module.engine.service_account_email
+  value       = google_service_account.this.email
 }
