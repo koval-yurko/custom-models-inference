@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, retriesOn429, retryPlan, waitText } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
-import { choosePlatform, hashPick, parseHash, parseModels, withPlatform } from "./config";
+import { choosePlatform, hashPick, parseHash, parseModels, sttHash, withPlatform } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
-import { clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, namesBody, parseReference, refTime, speakerCount, speakerName } from "./panels/Stt";
+import {
+  applyNames, bestCpwer, hasUnsavedEdits, resolveView, clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, namesBody, nearestTurn, parseReference, previousScore, refSeconds,
+  refSummary, refTime, renameRefSpeaker, scoreTone, speakerCount, speakerName, speechTime, speechmaticsToReference, type Score, type Summary,
+} from "./panels/stt/lib";
 import { voiceIds } from "./panels/Tts";
 import { parseSse, readSse } from "./sse";
 
@@ -233,6 +236,15 @@ describe("parseHash", () => {
     expect(parseHash("")).toEqual({ tab: "" });
     expect(parseHash("#/a%20b")).toEqual({ tab: "a b" });
   });
+  it("reads the row, the view and the working version", () => {
+    expect(parseHash("#/stt-mock/f1/ref/edit?v=20261124T101200")).toEqual({ tab: "stt-mock", file: "f1", row: "ref", view: "edit", v: "20261124T101200" });
+    expect(parseHash("#/stt-mock@runpod/f1/20261124T101200")).toEqual({ tab: "stt-mock", platform: "runpod", file: "f1", row: "20261124T101200" });
+    expect(parseHash("#/stt-mock/all")).toEqual({ tab: "stt-mock", file: "all" });
+  });
+  it("builds an STT hash and leaves out empty parts", () => {
+    expect(sttHash("stt-mock", undefined, "f1", "ref", "speakers", "v9")).toBe("#/stt-mock/f1/ref/speakers?v=v9");
+    expect(sttHash("stt-mock", "runpod", "f1")).toBe("#/stt-mock@runpod/f1");
+  });
 });
 
 describe("speakerCount", () => {
@@ -358,5 +370,124 @@ describe("hashPick", () => {
     expect(hashPick(models, parseHash("#/a"))).toBeUndefined();
     expect(hashPick(models, parseHash("#/a@modal"))).toBeUndefined();
     expect(hashPick(models, parseHash("#/b@runpod"))).toBeUndefined();
+  });
+});
+
+describe("speechmaticsToReference", () => {
+  const item = (content: string, speaker: string | undefined, start: number, end: number, type = "word") => ({
+    type,
+    start_time: start,
+    end_time: end,
+    ...(type === "punctuation" ? { attaches_to: "previous" } : {}),
+    alternatives: [{ content, ...(speaker ? { speaker } : {}) }],
+  });
+  it("joins items of 1 speaker, attaches punctuation, keeps entity text", () => {
+    const doc = {
+      metadata: { transcription_config: { language: "en" } },
+      results: [item("It's", "S1", 0.4, 0.88), item("100%", "S1", 0.9, 1.2, "entity"), item(",", "S1", 1.2, 1.2, "punctuation"), item("Yeah", "S2", 2, 2.3), item(".", "S2", 2.3, 2.3, "punctuation"), item("Ok", "S1", 3, 3.5)],
+    };
+    expect(speechmaticsToReference(doc)).toEqual({
+      language: "en",
+      turns: [
+        { speaker: "S1", start: 0.4, end: 1.2, text: "It's 100%," },
+        { speaker: "S2", start: 2, end: 2.3, text: "Yeah." },
+        { speaker: "S1", start: 3, end: 3.5, text: "Ok" },
+      ],
+    });
+  });
+  it("uses 'unknown' for an item without a speaker and rejects other JSON", () => {
+    expect(speechmaticsToReference({ results: [item("a", undefined, 0, 1)] }).turns[0].speaker).toBe("unknown");
+    expect(() => speechmaticsToReference({ turns: [] })).toThrow("not a Speechmatics transcript");
+  });
+});
+
+describe("importReference", () => {
+  it("detects Speechmatics JSON, else uses parseReference", () => {
+    expect(importReference(JSON.stringify({ results: [] }), "en")).toEqual({ language: "en", turns: [] }); // no language in the file: keep the field value
+    expect(importReference("Alice: Hi", "en")).toEqual({ language: "en", turns: [{ speaker: "Alice", text: "Hi" }] });
+  });
+});
+
+describe("refSeconds", () => {
+  it("reads the time forms of the reference", () => {
+    expect([12.5, "12.5", "12.5s", "01:02.5", "00:01:02.5"].map(refSeconds)).toEqual([12.5, 12.5, 12.5, 62.5, 62.5]);
+    expect(() => refSeconds("abc")).toThrow();
+  });
+});
+
+describe("reference speakers", () => {
+  const r = { language: "en", turns: [{ speaker: "S1", text: "a", start: 0, end: 2 }, { speaker: "S2", text: "b", start: 2, end: 3.5 }, { speaker: "S1", text: "c", start: 4, end: 5 }] };
+  it("renames every turn of 1 speaker", () => {
+    expect(renameRefSpeaker(r, "S1", "Alice").turns.map((t) => t.speaker)).toEqual(["Alice", "S2", "Alice"]);
+  });
+  it("summarizes and sums speech time; null without times", () => {
+    expect(refSummary(r)).toEqual({ turns: 3, speakers: ["S1", "S2"], timed: true });
+    expect(speechTime(r)).toEqual({ S1: 3, S2: 1.5 });
+    const untimed = { language: "", turns: [{ speaker: "A", text: "x" }] };
+    expect(refSummary(untimed).timed).toBe(false);
+    expect(speechTime(untimed)).toEqual({ A: null });
+  });
+});
+
+describe("scores", () => {
+  it("colours cpWER", () => {
+    expect([0.19, 0.2, 0.4, 0.41].map(scoreTone)).toEqual(["ok", "warn", "warn", "bad"]);
+  });
+  it("finds the best cpWER per file", () => {
+    expect(bestCpwer([{ file_id: "a", cpwer: 0.3 }, { file_id: "a", cpwer: 0.18 }, { file_id: "b", cpwer: 0.5 }])).toEqual({ a: 0.18, b: 0.5 });
+  });
+  it("finds the score of the next older version that has one", () => {
+    const v = (id: string) => ({ id }) as Summary;
+    const s = (cpwer: number) => ({ cpwer }) as Score;
+    const scores = { v3: s(0.1), v1: s(0.3) };
+    expect(previousScore([v("v3"), v("v2"), v("v1")], scores, "v3")).toBe(scores.v1);
+    expect(previousScore([v("v3"), v("v2"), v("v1")], scores, "v1")).toBeUndefined();
+  });
+});
+
+describe("applyNames", () => {
+  const source = { names: { spk_1: "Alice", spk_2: "Bob" }, mapping: { spk_1: "S1", spk_2: "S2" } };
+  it("fills empty names of labels that map to the same reference speaker", () => {
+    expect(applyNames(source, { names: {}, mapping: { spk_1: "S2", spk_2: "S1", spk_3: "S5" } })).toEqual({ spk_1: "Bob", spk_2: "Alice" });
+  });
+  it("never overwrites a saved name, and returns null when nothing changes", () => {
+    expect(applyNames(source, { names: { spk_1: "Carol" }, mapping: { spk_1: "S1", spk_2: "S2" } })).toEqual({ spk_1: "Carol", spk_2: "Bob" });
+    expect(applyNames(source, { names: { spk_1: "Alice" }, mapping: { spk_1: "S1" } })).toBeNull();
+    expect(applyNames(source, { names: {}, mapping: { "": "S1" } })).toBeNull(); // no speaker labels (diarization off)
+  });
+});
+
+describe("nearestTurn", () => {
+  it("finds the last turn that starts at or before t", () => {
+    expect(nearestTurn([0, 5, 10], 7)).toBe(1);
+    expect(nearestTurn([2, 5], 1)).toBe(0);
+    expect(nearestTurn([], 3)).toBe(-1);
+  });
+});
+
+describe("resolveView", () => {
+  const vs = [{ id: "v2" }, { id: "v1" }];
+  it("opens the reference Edit view when the file has no versions", () => {
+    expect(resolveView([], {}, false)).toEqual({ row: "ref", working: undefined, view: "edit", noVersions: true });
+  });
+  it("selects the newest version for an old link or an unknown id", () => {
+    expect(resolveView(vs, {}, true)).toEqual({ row: "v2", working: "v2", view: "transcript", noVersions: false });
+    expect(resolveView(vs, { row: "gone" }, true).row).toBe("v2");
+  });
+  it("keeps the working version on the reference row; Edit only without a reference", () => {
+    expect(resolveView(vs, { row: "ref", view: "speakers", v: "v1" }, true)).toEqual({ row: "ref", working: "v1", view: "speakers", noVersions: false });
+    expect(resolveView(vs, { row: "ref", view: "speakers", v: "x" }, false)).toEqual({ row: "ref", working: "v2", view: "edit", noVersions: false });
+  });
+});
+
+describe("hasUnsavedEdits", () => {
+  const saved = { language: "en", turns: [{ speaker: "A", text: "Hi" }] };
+  it("is false when the editor shows the saved reference or is empty without one", () => {
+    expect(hasUnsavedEdits("A: Hi", saved)).toBe(false);
+    expect(hasUnsavedEdits("", undefined)).toBe(false);
+  });
+  it("is true for typed or imported text", () => {
+    expect(hasUnsavedEdits("A: Hi there", saved)).toBe(true);
+    expect(hasUnsavedEdits("B: new", undefined)).toBe(true);
   });
 });

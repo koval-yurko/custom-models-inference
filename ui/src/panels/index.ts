@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import type { ModelConfig } from "../config";
 import Llm from "./Llm";
 import LlmRoutes from "./LlmRoutes";
-import Stt from "./Stt";
+import Stt from "./stt";
 import Tts from "./Tts";
 
 // Model type (the `type` of the `ui` Terraform output) -> panel. Add a new type here (see the model-ui skill).

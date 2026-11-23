@@ -45,7 +45,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 ```
 
 - `scripts/ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`), and the tab when no platform is left. Then `base_url` is the first platform that is left.
-- The tab shows a platform picker when 2 or more platforms are left. The panel gets `base_url` and `cold_start` of the chosen platform; the panel code does not change. The choice stays in `localStorage` per model and in the hash `#/<tab>@<platform>` (an STT link is `#/<tab>@<platform>/<file id>` or `#/<tab>/<file id>`).
+- The tab shows a platform picker when 2 or more platforms are left. The panel gets `base_url` and `cold_start` of the chosen platform; the panel code does not change. The choice stays in `localStorage` per model and in the hash `#/<tab>@<platform>` (an STT link is `#/<tab>[@<platform>]/<file id>[/<version id>|/ref/<view>?v=<version id>]`, or `#/<tab>[@<platform>]/all`).
 - Examples: `deployments/llm-a-gemma4-12b-vllm/outputs.tf`, `deployments/stt-a-qwen3-asr-diar/outputs.tf` (STT: the files paths get the same `/<platform>` prefix, so the panel works on each platform with no change). Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.
 
 `features` by type (the panel reads only these keys; add a key when you add a feature):
@@ -57,7 +57,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 | `tts` | `voices`, `default_voice` | `GET /v1/audio/voices` exists and returns `{"voices": [...]}`. |
 | `tts` | `formats`, `sample_rate` | `response_format` values; sample rate of `pcm` (16-bit mono). |
 | `llm` | `stream`, `max_tokens`, `max_context` | SSE on; default `max_tokens`; `--max-model-len`. |
-| `stt` | `max_mb` | STT-A files service (panel `Stt.tsx`): every file goes through `POST /v1beta/uploads` (signed `PUT`), then `POST /v1beta/files/<id>/transcribe`. The panel lists `GET /v1beta/files`, shows the versions of `GET /v1beta/files/<id>`, and 2 versions side by side. Link: `#/<tab>/<file id>`. `max_mb` is the inline limit of the direct `/v1beta/interactions` route, which the panel does not use. |
+| `stt` | `max_mb` | STT-A files service (panel folder `panels/stt/`, layout spec `docs/specs/2026-11-24-stt-ui-layout-design.md`): every file goes through `POST /v1beta/uploads` (signed `PUT`), then `POST /v1beta/files/<id>/transcribe`. The panel lists `GET /v1beta/files`, shows the versions of `GET /v1beta/files/<id>` as cards, the optional reference of the file (`GET`/`PUT .../reference`) with Edit, Evaluation and Speakers, and 2 versions side by side. Link: see the platform line above. `max_mb` is the inline limit of the direct `/v1beta/interactions` route, which the panel does not use. |
 | `llm-routes` | `routes`, `max_tokens` | Own JSON routes of a FastAPI app (`/extract` returns `{data}`, `/generate` returns `{text}`), panel `LlmRoutes.tsx`. Default `max_tokens`. |
 
 ## Steps: new deployment with a gateway (known type: `llm`, `tts`)
@@ -73,7 +73,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
 ## Steps: new model type (for example `stt`)
 
 1. Add `ui/src/panels/<Type>.tsx`. Copy the structure of `Tts.tsx`: use `call()` and `curlFor()` from `api.ts` (key, 429 retry, CORS error text), and `Timings`, `Status`, `Curl` from `components.tsx`.
-   - STT with the Gemini contract exists: `Stt.tsx` (type `stt`). For an OpenAI-compatible STT (`POST /v1/audio/transcriptions`), add a new type: send `FormData` with `file` and `model`. Do not set `Content-Type` (the browser sets the multipart boundary). Inputs: file upload and a record button (`MediaRecorder`). On iOS Safari, `MediaRecorder` makes `audio/mp4`. Streaming (`stream=true`) returns SSE: use `readSse()` from `sse.ts`.
+   - STT with the Gemini contract exists: `panels/stt/` (type `stt`). For an OpenAI-compatible STT (`POST /v1/audio/transcriptions`), add a new type: send `FormData` with `file` and `model`. Do not set `Content-Type` (the browser sets the multipart boundary). Inputs: file upload and a record button (`MediaRecorder`). On iOS Safari, `MediaRecorder` makes `audio/mp4`. Streaming (`stream=true`) returns SSE: use `readSse()` from `sse.ts`.
 2. Register the panel in `ui/src/panels/index.ts`.
 3. Add the type to the `features` table above.
 4. Add the routes to `ui/mock-server.mjs`, so the panel works without GCP.

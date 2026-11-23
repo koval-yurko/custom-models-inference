@@ -63,12 +63,21 @@ export const getApiKey = () => localStorage.getItem(KEY) ?? "";
 export const setApiKey = (v: string) => (v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY));
 
 /** "#/<tab>[@<platform>][/<file id>]" -> the tab id, the optional platform id and the optional file id (STT history links). */
-export function parseHash(hash: string): { tab: string; platform?: string; file?: string } {
-  const [first = "", file] = hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+export function parseHash(hash: string): { tab: string; platform?: string; file?: string; row?: string; view?: string; v?: string } {
+  const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
+  const [first = "", file, row, view] = path.split("/").map(decodeURIComponent);
+  const v = new URLSearchParams(query).get("v") ?? "";
   const at = first.indexOf("@");
   const tab = at < 0 ? first : first.slice(0, at);
   const platform = at < 0 ? "" : first.slice(at + 1);
-  return { tab, ...(platform ? { platform } : {}), ...(file ? { file } : {}) };
+  return { tab, ...(platform ? { platform } : {}), ...(file ? { file } : {}), ...(row ? { row } : {}), ...(view ? { view } : {}), ...(v ? { v } : {}) };
+}
+
+/** STT link: #/<tab>[@<platform>]/<file>[/<row>[/<view>]][?v=<version>]. Empty parts are left out. */
+export function sttHash(tab: string, platform: string | undefined, file?: string, row?: string, view?: string, v?: string): string {
+  const e = encodeURIComponent;
+  const parts = [platform ? `${e(tab)}@${e(platform)}` : e(tab), ...[file, file && row, file && row && view].filter(Boolean).map((x) => e(x!))];
+  return `#/${parts.join("/")}${v && file ? `?v=${e(v)}` : ""}`;
 }
 
 /** The platform the tab calls: the hash id if the model has it, else the stored id if it has it, else the first. */
