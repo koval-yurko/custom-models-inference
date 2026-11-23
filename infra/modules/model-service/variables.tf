@@ -36,7 +36,13 @@ variable "args" {
 }
 
 variable "env" {
-  description = "Plain environment variables (no secrets)."
+  description = "Plain environment variables. Put secrets in secret_env, not here."
+  type        = map(string)
+  default     = {}
+}
+
+variable "secret_env" {
+  description = "Secret environment variables: env var name -> Secret Manager secret ID in the same project. The service reads the latest version. The module gives the service SA secretAccessor on each secret."
   type        = map(string)
   default     = {}
 }

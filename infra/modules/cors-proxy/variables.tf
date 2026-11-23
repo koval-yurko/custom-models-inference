@@ -13,14 +13,44 @@ variable "name" {
   type        = string
 }
 
-variable "target" {
-  description = "Vertex AI URL that the proxy calls: the :rawPredict URL (https://<endpoint_dns>/v1/projects/.../endpoints/<id>:rawPredict), or the :invoke base that ends in /invoke. For /invoke the proxy appends the request path, so the gateway must use path_translation APPEND_PATH_TO_ADDRESS."
+variable "targets" {
+  description = "Platform id -> {url, append_path, auth}. The first path segment of a request picks the target (/vertex/v1/x). append_path = true: the proxy appends the rest of the path to url (Vertex AI :invoke base, Runpod), so the gateway must use APPEND_PATH_TO_ADDRESS. false: url is one fixed URL (Vertex AI :rawPredict). auth: google (the proxy SA token) or runpod (an API key from secret_env)."
+  type = map(object({
+    url         = string
+    append_path = bool
+    auth        = string
+  }))
+
+  validation {
+    condition     = alltrue([for t in values(var.targets) : startswith(t.url, "https://")])
+    error_message = "Every target url must be an https URL."
+  }
+  validation {
+    condition     = alltrue([for t in values(var.targets) : contains(["google", "runpod"], t.auth)])
+    error_message = "Every target auth must be google or runpod."
+  }
+}
+
+variable "default_platform" {
+  description = "Platform id for a path without a platform prefix (the old paths)."
   type        = string
 
   validation {
-    condition     = startswith(var.target, "https://")
-    error_message = "target must be an https URL."
+    condition     = contains(keys(var.targets), var.default_platform)
+    error_message = "default_platform must be a key of targets."
   }
+}
+
+variable "secret_env" {
+  description = "Provider API keys: env var name (RUNPOD_API_KEY) -> Secret Manager secret ID."
+  type        = map(string)
+  default     = {}
+}
+
+variable "timeout" {
+  description = "Request timeout of the proxy, for example \"300s\". Use the largest gateway deadline of the targets."
+  type        = string
+  default     = "300s"
 }
 
 variable "gateway_service_account_email" {

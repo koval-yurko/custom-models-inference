@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Pre-apply checks for every Terraform root: fmt, validate, test (mock provider) and tflint.
 Each root in deployments/ must also call the scale-alerts module (Slack messages at scale up and down).
-A deployment with Python code also runs its unit tests (image/tests/test_*.py, services/<name>/tests/test_*.py) with
-python3 -m unittest, from the folder that holds tests/.
+A root with Python code also runs its unit tests (tests/test_*.py of the root itself, for example a module, and
+image/tests/test_*.py, services/<name>/tests/test_*.py) with python3 -m unittest, from the folder that holds tests/.
 
 Run from anywhere:  ./scripts/check.py [path ...]   (default: infra/core, infra/modules/*, deployments/*)
+It also runs the unit tests of the scripts (scripts/tests/test_*.py).
 No GCP credentials needed. Exits 1 when a check fails. It cannot find real-world errors (quota, stock, timing).
 tflint is optional: the check is skipped with a note when it is not installed (see .tflint.hcl).
 """
@@ -28,8 +29,8 @@ def has_scale_alerts(d):
 
 
 def py_tests(d):
-    """(folder, test modules) of a deployment. A test that needs FastAPI is skipped when it is not installed."""
-    for folder in [d / "image", *sorted(d.glob("services/*"))]:
+    """(folder, test modules) of a root. A test that needs FastAPI is skipped when it is not installed."""
+    for folder in [d, d / "image", *sorted(d.glob("services/*"))]:
         mods = [f"tests.{p.stem}" for p in sorted(folder.glob("tests/test_*.py"))]
         if "tests.test_main" in mods and not importlib.util.find_spec("fastapi"):
             print(f"  note {name(folder)}/tests/test_main.py skipped: fastapi is not installed"
@@ -52,9 +53,9 @@ def check(d):
     if d.parent == ROOT / "deployments":
         step("scale alerts", has_scale_alerts(d),
              "Every deployment needs alerts.tf with module scale-alerts. See infra/README.md, \"Add scale alerts to a new deployment\".")
-        for folder, mods in py_tests(d):
-            r = subprocess.run([sys.executable, "-m", "unittest", *mods], cwd=folder, text=True, capture_output=True)
-            step(f"python tests ({folder.relative_to(d)})", r.returncode == 0, (r.stdout + r.stderr).strip())
+    for folder, mods in py_tests(d):
+        r = subprocess.run([sys.executable, "-m", "unittest", *mods], cwd=folder, text=True, capture_output=True)
+        step(f"python tests ({folder.relative_to(d)})", r.returncode == 0, (r.stdout + r.stderr).strip())
     # Do not touch a root that is already initialised (remote backend). Only add providers when they are missing.
     if not (d / ".terraform" / "providers").exists():
         step("init", *tf(d, "init", "-backend=false", "-input=false"))
@@ -81,6 +82,12 @@ if __name__ == "__main__":
     for d in roots(sys.argv[1:]):
         print(name(d))
         failures += check(d)
+    if (ROOT / "scripts" / "tests").is_dir():
+        r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=ROOT / "scripts",
+                           text=True, capture_output=True)
+        print(f"scripts\n  {'ok  ' if r.returncode == 0 else 'FAIL'} python tests (scripts)")
+        if r.returncode:
+            failures.append(f"scripts: python tests\n{(r.stdout + r.stderr).strip()}")
     if failures:
         sys.exit("\n\n".join(["", *failures, f"{len(failures)} check(s) failed."]))
     print("All checks passed.")

@@ -268,3 +268,37 @@ run "command_and_args_reach_the_container" {
     error_message = "command and args must reach the container"
   }
 }
+
+run "secret_env_reads_secret_manager" {
+  command = apply
+
+  variables {
+    secret_env = { RUNPOD_API_KEY = "runpod-api-key" }
+  }
+
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.this.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].secret if e.name == "RUNPOD_API_KEY"]) == "runpod-api-key"
+    error_message = "RUNPOD_API_KEY must read the secret runpod-api-key"
+  }
+  assert {
+    condition     = one([for e in google_cloud_run_v2_service.this.template[0].containers[0].env : e.value_source[0].secret_key_ref[0].version if e.name == "RUNPOD_API_KEY"]) == "latest"
+    error_message = "secret env must use the latest version"
+  }
+  assert {
+    condition     = google_secret_manager_secret_iam_member.secret_env["RUNPOD_API_KEY"].role == "roles/secretmanager.secretAccessor"
+    error_message = "the service SA needs secretAccessor"
+  }
+  assert {
+    condition     = google_secret_manager_secret_iam_member.secret_env["RUNPOD_API_KEY"].member == "serviceAccount:${google_service_account.this.email}"
+    error_message = "secretAccessor must go to the service SA"
+  }
+}
+
+run "no_secret_env_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(google_secret_manager_secret_iam_member.secret_env) == 0
+    error_message = "no secret IAM without secret_env"
+  }
+}

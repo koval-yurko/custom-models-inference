@@ -12,6 +12,7 @@ module "cors_proxy" {
   region                        = var.region
   name                          = "${local.gateway_id}-proxy"
   image                         = "${var.region}-docker.pkg.dev/${var.project_id}/dockerhub/library/python:3.13.9-slim"
-  target                        = local.raw_predict_url
+  targets                       = { vertex = { url = local.raw_predict_url, append_path = false, auth = "google" } }
+  default_platform              = "vertex"
   gateway_service_account_email = google_service_account.gateway.email
 }

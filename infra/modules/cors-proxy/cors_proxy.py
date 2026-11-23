@@ -1,14 +1,12 @@
 # Runs in the stock python image (python3 -u -c <this file>). Not a package: stdlib only, no build step.
-# The gateway calls this service. It adds CORS headers to every answer (also the 429 and 5xx of Vertex AI,
-# which come without them) and forwards the POST body to Vertex AI rawPredict with its own access token.
+# The gateway calls this service. It adds CORS headers to every answer (also the 429 and 5xx of the platforms,
+# which come without them) and forwards GET and POST to the target of the platform with its credential.
+# TARGETS (JSON) maps a platform id to {url, append_path, auth}. The first path segment picks the target
+# (/vertex/v1/x -> vertex, path /v1/x). Any other path goes to DEFAULT with the full path (the old paths).
 import http.client, json, os, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-TARGET = urlsplit(os.environ["TARGET"])
-# A target that ends in /invoke (Vertex AI :invoke) gets the request path appended: /extract -> .../invoke/extract.
-# A :rawPredict target is one fixed URL.
-INVOKE = TARGET.path.endswith("/invoke")
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -17,6 +15,33 @@ CORS = {
 }
 META = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 _tok = {"value": "", "exp": 0.0}
+KEYS = {"runpod": "RUNPOD_API_KEY"}  # auth -> env var (a Secret Manager secret)
+
+
+def load_targets(environ):
+    targets, default = json.loads(environ["TARGETS"]), environ["DEFAULT"]
+    if default not in targets:
+        raise ValueError(f"DEFAULT {default!r} is not in TARGETS {sorted(targets)}")
+    return targets, default
+
+
+def pick(path, targets, default):
+    """Return (platform id, path for the upstream). The query string stays on the path."""
+    head, sep, tail = path[1:].partition("/")
+    seg, q, query = head.partition("?")
+    if seg in targets:
+        return seg, ("/" + tail) if sep else ("/" + q + query if q else "/")
+    return default, path
+
+
+def upstream_headers(method, authorization):
+    # A POST always goes upstream as JSON, also when the client sent no or another Content-Type (as before).
+    return {"Authorization": authorization, **({"Content-Type": "application/json"} if method == "POST" else {})}
+
+
+def upstream_url(target, rest):
+    # append_path: the target is a base URL (Vertex AI :invoke, Runpod). Else one fixed URL (:rawPredict).
+    return target["url"] + rest if target["append_path"] else target["url"]
 
 
 def token():
@@ -25,6 +50,11 @@ def token():
         d = json.load(urllib.request.urlopen(r, timeout=5))
         _tok.update(value=d["access_token"], exp=time.time() + d["expires_in"])
     return _tok["value"]
+
+
+def auth_header(auth, environ, google_token):
+    """google: the metadata server token. Else the API key of the platform. A missing key raises KeyError (502)."""
+    return f"Bearer {google_token()}" if auth == "google" else f"Bearer {environ[KEYS[auth]]}"
 
 
 class H(BaseHTTPRequestHandler):
@@ -49,11 +79,15 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+    def forward(self, method):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method == "POST" else None
         try:
-            conn = http.client.HTTPSConnection(TARGET.netloc, timeout=300)
-            conn.request("POST", TARGET.path + self.path if INVOKE else TARGET.path, body, {"Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
+            pid, rest = pick(self.path, TARGETS, DEFAULT)
+            t = TARGETS[pid]
+            u = urlsplit(upstream_url(t, rest))
+            headers = upstream_headers(method, auth_header(t["auth"], os.environ, token))
+            conn = http.client.HTTPSConnection(u.netloc, timeout=TIMEOUT)
+            conn.request(method, u.path + ("?" + u.query if u.query else ""), body, headers)
             r = conn.getresponse()
         except Exception as e:  # the gateway must always get an answer with CORS headers
             msg = json.dumps({"error": f"proxy: {e}"}).encode()
@@ -62,5 +96,14 @@ class H(BaseHTTPRequestHandler):
         self.reply(r.status, keep, iter(lambda: r.read1(8192), b""))
         conn.close()
 
+    def do_GET(self):
+        self.forward("GET")
 
-ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), H).serve_forever()
+    def do_POST(self):
+        self.forward("POST")
+
+
+if __name__ == "__main__":
+    TARGETS, DEFAULT = load_targets(os.environ)
+    TIMEOUT = int(os.environ.get("TIMEOUT", "300"))
+    ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), H).serve_forever()

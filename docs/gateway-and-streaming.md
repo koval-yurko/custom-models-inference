@@ -29,7 +29,7 @@ flowchart LR
         API["API<br/>1 per name in local.gateway_apis"]
         KEY["1 shared API key"]
     end
-    subgraph dep["deployments/#lt;name#gt;/gateway.tf"]
+    subgraph dep["gateway module or gateway.tf"]
         direction TB
         SA["gateway<br/>service account"]
         CFG["API config<br/>OpenAPI 2.0 spec"]
@@ -47,6 +47,17 @@ flowchart LR
 - `deadline` is the time limit for the whole response (300 s).
 - Each path also has an `options` operation without a key. It answers the browser CORS preflight. For Vertex AI, the CORS proxy answers it.
 - A config cannot change in place, so Terraform makes the new config first (`create_before_destroy`).
+
+## Platform paths
+
+A deployment on the `model` module (LLM-A) can run on several platforms. Its gateway has 2 paths per route:
+
+| Path | Goes to |
+|---|---|
+| `/vertex/v1/chat/completions` | The `vertex` target. The CORS proxy removes `/vertex` |
+| `/v1/chat/completions` (old path) | The default platform: the first one in `local.platforms` |
+
+The gateway sends the full path to the CORS proxy (`APPEND_PATH_TO_ADDRESS`). The proxy picks the target by the first path segment. Details: `infra/README.md`, sections "Module: gateway" and "CORS proxy".
 
 ## Streaming
 

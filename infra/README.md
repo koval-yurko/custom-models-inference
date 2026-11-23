@@ -143,7 +143,7 @@ The parts are in 2 places:
 |---|---|---|
 | Gateway API and its managed service | `infra/core/gateways.tf` | The key must target the managed service. Its name has a random part, so it must exist in the same root as the key. |
 | Shared API key | `infra/core/gateways.tf` | One key for all gateways |
-| Gateway service account, `run.invoker`, OpenAPI spec, API config, gateway | `deployments/<name>/gateway.tf` | These belong to one model |
+| Gateway service account, `run.invoker`, OpenAPI spec, API config, gateway | `deployments/<name>/gateway.tf`, or the [gateway module](#module-gateway) for a deployment on the [model module](#module-model-platforms) | These belong to one model |
 | Streaming | `scripts/gateway-streaming.py` | The provider has no streaming field |
 
 ### Get the API key
@@ -214,9 +214,11 @@ Example: a new deployment `deployments/stt-a-whisper-cpu`.
 8. Test with `curl` and the key from `terraform -chdir=infra/core output -raw api_key` (see the deployment README).
 9. Add the `ui` output and run `./scripts/ui-deploy.py`. Follow the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
-Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with the `:rawPredict` URL of the endpoint as `target`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/llm-a-gemma4-12b-vllm-vertex/gateway.tf` and `cors_proxy.tf`.
+Vertex AI deployments: use the [model module](#module-model-platforms). It makes the CORS proxy and the gateway, so steps 3 to 6 are not necessary. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/`. The rest of this section is for LLM-B and STT-A, which still call `vertex-model` directly.
 
-For an endpoint with `invoke_routes = true`, set `target` to the `:invoke` base, which ends in `/invoke`. Use `path_translation = "APPEND_PATH_TO_ADDRESS"`. The proxy then adds the request path, for example `/extract` goes to `<base>/invoke/extract`. List each route as its own gateway path. See `deployments/llm-b-qwen35-9b-fastapi/`.
+Older Vertex AI deployments: step 4 is different. There is no `invokers` list. Copy `cors_proxy.tf` too: it calls the module `cors-proxy` with 1 target `vertex`: the `:rawPredict` URL of the endpoint, `append_path = false`. The gateway backend is the proxy URL (`address = module.cors_proxy.url`, `path_translation = "CONSTANT_ADDRESS"`). The module gives the gateway service account `roles/run.invoker` on the proxy, and the proxy service account `roles/aiplatform.user` on the project. The gateway sends its ID token to the proxy only. The proxy calls Vertex AI with its own access token. See `deployments/stt-a-qwen3-asr-diar-vertex/gateway.tf` and `cors_proxy.tf`.
+
+For an endpoint with `invoke_routes = true`, set the target `url` to the `:invoke` base, which ends in `/invoke`, with `append_path = true`. Use `path_translation = "APPEND_PATH_TO_ADDRESS"`. The proxy then adds the request path, for example `/extract` goes to `<base>/invoke/extract`. List each route as its own gateway path. See `deployments/llm-b-qwen35-9b-fastapi/`.
 
 To remove a gateway, destroy the deployment first. Then remove the name from `local.gateway_apis` and apply `infra/core/`.
 
@@ -281,7 +283,7 @@ Terraform creates:
 - `roles/storage.objectViewer` on `weights_bucket` for that service account, if you set one,
 - a dedicated Vertex AI endpoint (own DNS, no 1.5 MB body limit of the shared endpoint, needed for `:invoke`).
 
-`scripts/vertex.py` does the model upload and the deploy through the Vertex AI REST API (`v1beta1`). Terraform only renders the request bodies (output `vertex`).
+`scripts/vertex.py` (or `scripts/deploy.py` for a deployment on [Module: model (platforms)](#module-model-platforms)) does the model upload and the deploy through the Vertex AI REST API (`v1beta1`). The code is in `scripts/platforms/vertex.py`. Terraform only renders the request bodies (output `vertex`).
 
 ### Deploy method: Terraform plus 1 script step
 
@@ -310,7 +312,7 @@ output "vertex" {
    ```sh
    cd deployments/<name> && terraform apply
    ```
-2. Upload and deploy. First the script fills the image cache of the remote proxy repo with one manifest request, because Vertex AI does not start the proxy fetch. The script stops if the answer is not 200. Then it waits for both operations (the deploy can take 30 minutes).
+2. Upload and deploy. For a deployment on the [model module](#module-model-platforms), use `./scripts/deploy.py deploy deployments/<name>` instead: it calls the same code. First the script fills the image cache of the remote proxy repo with one manifest request, because Vertex AI does not start the proxy fetch. The script stops if the answer is not 200. Then it waits for both operations (the deploy can take 30 minutes).
    ```sh
    ./scripts/vertex.py deploy deployments/<name>
    ```
@@ -406,7 +408,7 @@ The endpoint is private. The module grants no access. A caller needs `aiplatform
 
 ### Outputs
 
-`endpoint_id`, `endpoint_dns`, `service_account_email`, `vertex` (input for `scripts/vertex.py`).
+`endpoint_id`, `endpoint_dns`, `service_account_email`, `vertex` (input for `scripts/vertex.py` and `scripts/platforms/vertex.py`).
 
 ### Example
 
@@ -439,12 +441,75 @@ The first deployment card (LLM-A on Vertex AI) checks these:
 3. `invokeRoutePrefix` sits in `containerSpec` in `v1beta1`, and the `<base>/invoke/<path>` URL form.
 4. The L4 quota for Vertex AI prediction in `us-central1` (see [Vertex AI GPU quota](#vertex-ai-gpu-quota-check-before-the-first-vertex-ai-deployment)).
 
+## Module: model (platforms)
+
+`modules/model/` deploys 1 model spec to a list of platforms. It is the target layout of all Vertex AI deployments. LLM-A uses it. LLM-B and STT-A still use `vertex-model` directly (phase 6 moves them). Design: `docs/specs/2026-11-22-multi-platform-design.md`.
+
+One call creates:
+
+- 1 adapter per platform in `platforms`. Phase 1 has only `vertex` ([Module: platform-vertex](#module-platform-vertex)). The module rejects other ids, an empty list and a duplicated id at plan.
+- 1 CORS proxy `<gateway_id>-proxy` with 1 target per platform. The first platform is the default for the old paths.
+- 1 API Gateway ([Module: gateway](#module-gateway)) with the old paths plus 1 path per platform: `/<platform><route>`.
+
+Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every platform), `gateway_id` (the API in `infra/core/gateways.tf`), `platforms`, `spec`, `platform_options`.
+
+`spec` is platform-neutral:
+
+| Field | Meaning |
+|---|---|
+| `image` | `{ stock = "<Docker Hub image>" }` or `{ own = "<image:tag in the models repo>" }`. Set exactly one |
+| `args` | Engine flags that work on every platform and GPU. `{model}` becomes the weights path of the platform |
+| `env` | Plain env vars (default `{}`) |
+| `port`, `health_route` | Container port (default 8080) and health route |
+| `routes` | Gateway paths of the model, for example `["/v1/chat/completions"]` |
+| `gpu` | `"L4"`, or null for CPU |
+| `max_replicas`, `idle_seconds` | Default 1 and 300. Min replicas is always 0 |
+| `weights` | `{ hf_repo, revision, gcs_dir }`. `gcs_dir` is the `TARGET_DIR` of the weights-copy job. `revision` is optional in phase 1 |
+
+`platform_options.<id>` holds the options of 1 platform. A flag that depends on the platform or the GPU goes into `platform_options.<id>.extra_args`. The adapter appends it to `spec.args`. `platform_options.<id>.name` overrides `name` for 1 platform.
+
+Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`. The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm-vertex/main.tf` and `outputs.tf`.
+
+After apply, run the post-apply step of each platform:
+
+```sh
+./scripts/deploy.py deploy   deployments/<name>                    # every platform in local.platforms
+./scripts/deploy.py deploy   deployments/<name> --platform vertex  # one platform
+./scripts/deploy.py undeploy deployments/<name> --platform vertex  # before terraform destroy, or before you remove vertex from the list
+./scripts/deploy.py status   deployments/<name>                    # deployed or not, per platform
+```
+
+`deploy.py` reads the outputs `platforms` and `targets`. A target with `post_apply = "vertex"` runs `scripts/platforms/vertex.py` (model upload and deploy, see [Deploy method](#deploy-method-terraform-plus-1-script-step)). At the end it runs `ui-deploy.py --config-only`. It does not run `terraform apply`.
+
+### Module: platform-vertex
+
+`modules/platform-vertex/` is the Vertex AI adapter. It calls `modules/vertex-model` (unchanged) and maps the spec:
+
+- Image: `stock` becomes `<region>-docker.pkg.dev/<project>/dockerhub/<image>` (`library/` is added for an image without a namespace). `own` becomes `<region>-docker.pkg.dev/<project>/models/<own>`.
+- Args: `spec.args` plus `options.extra_args`. `{model}` becomes `$(AIP_STORAGE_URI)`.
+- Env: `spec.env`, then `HF_HUB_OFFLINE = "1"`, then `options.env`.
+- `gpu = "L4"` becomes `NVIDIA_L4`. Another value fails at plan.
+- Options: `name`, `machine_type` (default `g2-standard-8`), `shared_memory_size_mb`, `deployment_timeout` (default `1800s`), `extra_args`, `env`, `predict_route`. With `predict_route`, the target is the fixed `:rawPredict` URL. Without it, the upload uses invoke routes and the target is the `:invoke` base.
+
+Output `target`: `{ id = "vertex", label = "Vertex AI", url, append_path, auth = "google", cold_start = "retry-429", deadline = 300, post_apply = "vertex" }`. Every adapter has the same fields. Also `vertex` (input for `scripts/platforms/vertex.py`), `endpoint_id`, `endpoint_dns`, `service_account_email`.
+
+### Module: gateway
+
+`modules/gateway/` makes the gateway SA `<gateway_id>-gw`, the API config and the gateway, as the `gateway.tf` files of the older deployments do.
+
+- Paths: for each route `r`, the old path `r` and 1 path `/<platform>r` per platform. `extra_paths` (path to `{ backend_url, methods, deadline }`, for a second backend) get the same rule.
+- Each operation has its own `x-google-backend` with `path_translation = "APPEND_PATH_TO_ADDRESS"` and the deadline of its platform (`deadlines`). The old paths use the deadline of the first platform. There is no top-level `x-google-backend`: API Gateway ignores it on a path.
+- Every path needs the API key, except the `options` operation (CORS preflight).
+- Inputs: `project_id`, `region` (gateway region), `gateway_id` (max 27 chars), `backend_url`, `platforms`, `routes`, `methods` (default `["post"]`), `deadlines`, `extra_paths`. Outputs: `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `service_account_email`, `address`, `openapi`.
+- `scripts/gateway-streaming.py` reads the root output `gateway_address` to import the gateway. A root without it (TTS-A, LLM-B, STT-A) uses `google_api_gateway_gateway.this`.
+
 ## Test UI
 
 A static React app (`ui/`) to test the models in a browser, also on a phone. It has 1 tab for each model. There is no backend: the browser calls the API Gateways with the shared API key. The key stays in the `localStorage` of the browser.
 
 - URL: `terraform -chdir=infra/core output -raw ui_url` (`https://storage.googleapis.com/<project_id>-ui/index.html`).
 - Tabs come from `models.json`. `scripts/ui-deploy.py` writes it from the `ui` output of each deployment. A deployment shows in the UI only after it is applied with a `ui` output.
+- A deployment on the `model` module lists its platforms in the `ui` output (`platforms = module.model.ui_platforms`). `ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`) and drops the tab when no platform is left. A tab with 2 or more platforms has a platform picker.
 - The gateway URL changes when Terraform or `scripts/gateway-streaming.py` replaces the gateway. Then run `./scripts/ui-deploy.py --config-only`.
 - To add a model, a feature or a new model type, use the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 
@@ -469,10 +534,15 @@ Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS heade
 
 - The proxy is a private Cloud Run service in the stock `python` image from the `dockerhub` proxy repo. It runs `cors_proxy.py` (standard library only, no build).
 - It answers `OPTIONS` itself with status 204 and the CORS headers (`Access-Control-Allow-Origin: *`, methods `GET, POST, OPTIONS`, headers `content-type, x-api-key, authorization`).
-- It forwards a `POST` to the `target` (the `:rawPredict` URL) with its own access token, streams the answer back, and adds the CORS headers to every answer, also to the 429.
-- It scales to zero (max 2 instances). Only the gateway SA has `roles/run.invoker`. Only the proxy SA has `roles/aiplatform.user` (on the project: the provider has no IAM resource for 1 endpoint).
-- Inputs: `project_id`, `region`, `name`, `image`, `target`, `gateway_service_account_email`. Outputs: `url`, `service_name`, `service_account_email`.
-- A deployment uses it in 2 places (see `deployments/llm-a-gemma4-12b-vllm-vertex/`): `cors_proxy.tf` calls the module, and `gateway.tf` sets `x-google-backend.address` to `module.cors_proxy.url` for the whole API. The `options` operation has no backend of its own.
+- It forwards `GET` and `POST` to a target, streams the answer back, and adds the CORS headers to every answer, also to the 429.
+- Targets: the input `targets` maps a platform id to `{ url, append_path, auth }`. The first path segment picks the target: `/vertex/v1/chat/completions` goes to `vertex` with the path `/v1/chat/completions`. A path without a known platform segment (the old paths, for example `/v1/chat/completions`) goes to `default_platform` with the full path. The query string stays.
+- `append_path = true`: the proxy appends the path to `url` (Vertex AI `:invoke` base). `append_path = false`: `url` is one fixed URL (Vertex AI `:rawPredict`).
+- `auth = "google"`: the proxy sends its own access token. `runpod` (phase 3): the proxy sends the key from `RUNPOD_API_KEY`. These come from Secret Manager through the input `secret_env` (env name to secret ID). A missing key gives HTTP 502 with CORS headers.
+- It scales to zero (max 2 instances). Only the gateway SA has `roles/run.invoker`. The proxy SA has `roles/aiplatform.user` only when a target has `auth = "google"` (on the project: the provider has no IAM resource for 1 endpoint).
+- Inputs: `project_id`, `region`, `name`, `image`, `targets`, `default_platform`, `secret_env` (default `{}`), `timeout` (default `"300s"`), `gateway_service_account_email`. Outputs: `url`, `service_name`, `service_account_email`, `env` (for tests).
+- The gateway must use `path_translation = "APPEND_PATH_TO_ADDRESS"`, so the proxy sees the path.
+- A deployment on [Module: model (platforms)](#module-model-platforms) gets the proxy from the module. LLM-B and STT-A still call it in their `cors_proxy.tf` with 1 target `vertex`.
+- Python unit tests: `infra/modules/cors-proxy/tests/test_cors_proxy.py`. `./scripts/check.py` runs them.
 - Kokoro answers CORS itself, so the TTS gateway does not use it.
 - Check: `curl -si -X OPTIONS "$GW/v1/chat/completions" -H "Origin: https://storage.googleapis.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"`. The answer must be 204 or 200 with `access-control-allow-origin`.
 

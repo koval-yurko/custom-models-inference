@@ -78,8 +78,15 @@ def wait(op, minutes=20):
     sys.exit(f"Timeout: operation {op} is not done")
 
 
+def gateway_address(outputs):
+    """State address of the gateway: the gateway_address output (infra/modules/model), else the root resource."""
+    return outputs.get("gateway_address", {}).get("value") or "google_api_gateway_gateway.this"
+
+
 def main():
-    gw, loc, cfg = (run("terraform", "output", "-raw", o) for o in ("gateway_id", "gateway_region", "api_config"))
+    outputs = json.loads(run("terraform", "output", "-json"))
+    gw, loc, cfg = (outputs[o]["value"] for o in ("gateway_id", "gateway_region", "api_config"))
+    addr = gateway_address(outputs)
     project = cfg.split("/")[1]  # projects/<p>/locations/global/apis/<api>/configs/<id>
     name = f"projects/{project}/locations/{loc}/gateways/{gw}"
 
@@ -107,8 +114,8 @@ def main():
         sys.exit(f"Gateway does not stream: {d}")
     print(f"Gateway URL: https://{d['defaultHostname']}")
 
-    if "google_api_gateway_gateway.this" not in run("terraform", "state", "list").splitlines():
-        run("terraform", "import", "google_api_gateway_gateway.this", name, capture=False)
+    if addr not in run("terraform", "state", "list").splitlines():
+        run("terraform", "import", addr, name, capture=False)
     # Read the new hostname into the state. A refresh-only run changes nothing in GCP.
     run("terraform", "apply", "-refresh-only", "-auto-approve", capture=False)
 

@@ -7,6 +7,7 @@ module "cors_proxy" {
   region                        = var.region
   name                          = "${local.gateway_id}-proxy"
   image                         = "${var.region}-docker.pkg.dev/${var.project_id}/dockerhub/library/python:3.13.9-slim"
-  target                        = "https://${module.model.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${module.model.endpoint_id}/invoke"
+  targets                       = { vertex = { url = "https://${module.model.endpoint_dns}/v1/projects/${var.project_id}/locations/${var.region}/endpoints/${module.model.endpoint_id}/invoke", append_path = true, auth = "google" } }
+  default_platform              = "vertex"
   gateway_service_account_email = google_service_account.gateway.email
 }

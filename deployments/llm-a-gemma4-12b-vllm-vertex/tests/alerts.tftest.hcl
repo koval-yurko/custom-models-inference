@@ -1,4 +1,8 @@
-mock_provider "google" {}
+mock_provider "google" {
+  mock_resource "google_cloud_run_v2_service" {
+    defaults = { uri = "https://proxy" }
+  }
+}
 mock_provider "google-beta" {}
 
 variables {
@@ -14,15 +18,15 @@ run "alerts_watch_own_model" {
   }
 
   assert {
-    condition     = strcontains(module.scale_alerts.filters.ready, "resource.labels.endpoint_id=\"${module.model.endpoint_id}\"")
+    condition     = strcontains(module.scale_alerts[0].filters.ready, "resource.labels.endpoint_id=\"${module.model.vertex_endpoint_id}\"")
     error_message = "the alerts must watch only this endpoint"
   }
   assert {
-    condition     = strcontains(module.scale_alerts.filters.ready, "Application startup complete.")
+    condition     = strcontains(module.scale_alerts[0].filters.ready, "Application startup complete.")
     error_message = "ready must be the line Application startup complete."
   }
   assert {
-    condition     = strcontains(module.scale_alerts.filters.down, "Application shutdown complete.")
+    condition     = strcontains(module.scale_alerts[0].filters.down, "Application shutdown complete.")
     error_message = "the down alert must watch the uvicorn shutdown line"
   }
 }

@@ -51,6 +51,19 @@ resource "google_cloud_run_v2_service" "this" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.secret_env
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = merge(
           { cpu = var.cpu, memory = var.memory },
@@ -119,4 +132,13 @@ resource "google_storage_bucket_iam_member" "weights" {
   bucket = var.weights_bucket
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.this.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "secret_env" {
+  for_each = var.secret_env
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.this.email}"
 }
