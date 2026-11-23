@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { call } from "./api";
+import { call, retriesOn429, retryPlan, waitText } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
-import { parseHash, parseModels } from "./config";
+import { choosePlatform, hashPick, parseHash, parseModels, withPlatform } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
 import { clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, namesBody, parseReference, refTime, speakerCount, speakerName } from "./panels/Stt";
 import { voiceIds } from "./panels/Tts";
@@ -86,7 +86,114 @@ describe("call (Vertex 429 retry)", () => {
     const p = call(model, "/x", {}, onRetry);
     await vi.advanceTimersByTimeAsync(30_000);
     expect((await p).status).toBe(200);
-    expect(onRetry).toHaveBeenCalledWith(1);
+    expect(onRetry).toHaveBeenCalledWith(1, "429");
+  });
+
+  it("retries a real 429 for cold_start retry-429 (Vertex AI, Runpod)", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn().mockResolvedValueOnce(new Response("", { status: 429 })).mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    const onRetry = vi.fn();
+    const p = call({ base_url: "https://gw", features: { cold_start: "retry-429" } } as never, "/x", {}, onRetry);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await p).status).toBe(200);
+    expect(onRetry).toHaveBeenCalledWith(1, "429");
+  });
+
+  it("returns a 429 at once for cold_start hold (the platform keeps the request open)", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("", { status: 429 }));
+    vi.stubGlobal("fetch", f);
+    const onRetry = vi.fn();
+    expect((await call({ base_url: "https://gw", features: { cold_start: "hold" } } as never, "/x", {}, onRetry)).status).toBe(429);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+});
+
+describe("call (gateway timeout retry, opt-in)", () => {
+  const hold = { base_url: "https://gw", features: { cold_start: "hold" } } as never;
+  beforeEach(() => vi.stubGlobal("localStorage", { getItem: () => "k" }));
+  afterEach(() => (vi.unstubAllGlobals(), vi.useRealTimers()));
+
+  it("retries a network error that comes after 30 s (the gateway 504 has no CORS) and returns the next answer", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, rej) => setTimeout(() => rej(new TypeError("Failed to fetch")), 300_000)))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    const onRetry = vi.fn();
+    const p = call(hold, "/x", {}, onRetry, { retryTimeouts: true });
+    await vi.advanceTimersByTimeAsync(302_000);
+    expect((await p).status).toBe(200);
+    expect(onRetry).toHaveBeenCalledWith(1, "timeout");
+  });
+
+  it("retries a 504 after a long wait", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn()
+      .mockImplementationOnce(() => new Promise((res) => setTimeout(() => res(new Response("", { status: 504 })), 60_000)))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    const p = call(hold, "/x", {}, undefined, { retryTimeouts: true });
+    await vi.advanceTimersByTimeAsync(63_000);
+    expect((await p).status).toBe(200);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a fast network error (a wrong key)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(call(hold, "/x", {}, undefined, { retryTimeouts: true })).rejects.toThrow(/API key/);
+  });
+
+  it("does not retry a timeout without the option (STT: a second POST would start a second run)", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise((_, rej) => setTimeout(() => rej(new TypeError("x")), 300_000))));
+    const p = call(hold, "/x", {});
+    const done = expect(p).rejects.toThrow(/failed/);
+    await vi.advanceTimersByTimeAsync(300_000);
+    await done;
+  });
+});
+
+describe("retryPlan", () => {
+  it("429 retries in 30 s for retry-429 only", () => {
+    expect(retryPlan(429, 0, "retry-429", false)).toEqual({ reason: "429", waitMs: 30_000 });
+    expect(retryPlan(429, 0, "hold", true)).toBeNull();
+  });
+  it("a timeout retries in 2 s on a cold-start platform after 30 s, when the panel allows it", () => {
+    expect(retryPlan(undefined, 31_000, "hold", true)).toEqual({ reason: "timeout", waitMs: 2_000 });
+    expect(retryPlan(504, 31_000, "retry-429", true)).toEqual({ reason: "timeout", waitMs: 2_000 });
+    expect(retryPlan(502, 31_000, "hold", true)?.reason).toBe("timeout");
+    expect(retryPlan(undefined, 5_000, "hold", true)).toBeNull();
+    expect(retryPlan(undefined, 31_000, "hold", false)).toBeNull();
+    expect(retryPlan(undefined, 31_000, undefined, true)).toBeNull(); // TTS on Cloud Run: no cold-start rule
+    expect(retryPlan(500, 31_000, "hold", true)).toBeNull();
+  });
+});
+
+describe("waitText", () => {
+  it("says nothing for a fast answer", () => {
+    expect(waitText({ elapsedMs: 2_000, coldStart: "hold", label: "Runpod" })).toBeNull();
+  });
+  it("shows the time, then the cold start hint", () => {
+    expect(waitText({ elapsedMs: 5_000, coldStart: "hold", label: "Runpod" })).toBe("Waiting for Runpod… 0:05. Press Stop to cancel.");
+    expect(waitText({ elapsedMs: 75_000, coldStart: "hold", label: "Runpod" })).toBe(
+      "Waiting for Runpod… 1:15. Probably a cold start: a replica starts, this takes about 3 to 10 minutes. Press Stop to cancel.",
+    );
+  });
+  it("names the retry reason and the attempt", () => {
+    expect(waitText({ elapsedMs: 40_000, coldStart: "retry-429", label: "Runpod", attempt: 2, reason: "429" })).toBe(
+      "Waiting for Runpod… 0:40. The model is starting (HTTP 429): retry 2, every 30 s. Press Stop to cancel.",
+    );
+    expect(waitText({ elapsedMs: 310_000, coldStart: "hold", attempt: 1, reason: "timeout" })).toBe(
+      "Waiting for the model… 5:10. The gateway stopped after its time limit, but the replica is still starting: attempt 2. Press Stop to cancel.",
+    );
+  });
+});
+
+describe("retriesOn429", () => {
+  it("retries for retry-429 and the old vertex-429 only", () => {
+    expect([retriesOn429("retry-429"), retriesOn429("vertex-429"), retriesOn429("hold"), retriesOn429(undefined)]).toEqual([true, true, false, false]);
   });
 });
 
@@ -192,5 +299,64 @@ describe("reference text", () => {
     expect(draft).toBe("[00:00:00.1 - 00:00:04.9] Alice: Hello there.\n[00:00:05.0 - 00:00:06.0] spk_2: Hi.");
     expect(parseReference(draft, "").turns).toHaveLength(2);
     expect(draftFromVersion([], "Hello\nthere.", undefined)).toBe("Speaker: Hello there.");
+  });
+});
+
+describe("parseModels platforms", () => {
+  const p = (id: string, base_url = `https://gw/${id}/`) => ({ id, label: id.toUpperCase(), base_url, cold_start: "retry-429" });
+  const ok = { id: "a", title: "A", type: "llm", base_url: "https://gw/vertex", model: "m" };
+  it("keeps the platforms in order and trims each base_url", () => {
+    const m = parseModels({ models: [{ ...ok, platforms: [p("vertex"), p("runpod")] }] })[0];
+    expect(m.platforms?.map((x) => [x.id, x.base_url])).toEqual([["vertex", "https://gw/vertex"], ["runpod", "https://gw/runpod"]]);
+  });
+  it("rejects an empty list, a duplicate id and an http URL", () => {
+    expect(() => parseModels({ models: [{ ...ok, platforms: [] }] })).toThrow(/models\[0\]\.platforms/);
+    expect(() => parseModels({ models: [{ ...ok, platforms: [p("vertex"), p("vertex")] }] })).toThrow(/duplicate/);
+    expect(() => parseModels({ models: [{ ...ok, platforms: [p("vertex", "http://x")] }] })).toThrow(/platforms\[0\]\.base_url/);
+    expect(() => parseModels({ models: [{ ...ok, platforms: [{ id: "vertex", base_url: "https://gw" }] }] })).toThrow(/platforms\[0\]\.label/);
+  });
+  it("accepts an entry without platforms (old models.json)", () => {
+    expect(parseModels({ models: [ok] })[0].platforms).toBeUndefined();
+  });
+});
+
+describe("parseHash platform", () => {
+  it("reads @<platform> and keeps the STT file link", () => {
+    expect(parseHash("#/llm-a@runpod")).toEqual({ tab: "llm-a", platform: "runpod" });
+    expect(parseHash("#/stt@vertex/f1")).toEqual({ tab: "stt", platform: "vertex", file: "f1" });
+    expect(parseHash("#/stt/f1")).toEqual({ tab: "stt", file: "f1" });
+    expect(parseHash("#/a@")).toEqual({ tab: "a" });
+  });
+});
+
+describe("choosePlatform and withPlatform", () => {
+  const V = { id: "vertex", label: "Vertex AI", base_url: "https://gw/vertex", cold_start: "retry-429" };
+  const R = { id: "runpod", label: "Runpod", base_url: "https://gw/runpod", cold_start: "retry-429" };
+  const m = { id: "a", title: "A", type: "llm", base_url: V.base_url, model: "x", features: { stream: true }, platforms: [V, R] };
+  it("hash wins, then the stored choice, then the first platform", () => {
+    expect(choosePlatform(m, "runpod", "vertex")).toBe(R);
+    expect(choosePlatform(m, "modal", "runpod")).toBe(R); // unknown hash id: not deployed
+    expect(choosePlatform(m, undefined, "runpod")).toBe(R); // STT file link without @platform
+    expect(choosePlatform(m, undefined, "gone")).toBe(V);
+    expect(choosePlatform({ ...m, platforms: undefined })).toBeUndefined();
+  });
+  it("gives the panel the base_url and cold_start of the platform, and keeps the rest", () => {
+    expect(withPlatform(m, R)).toMatchObject({ id: "a", base_url: R.base_url, features: { stream: true, cold_start: "retry-429" } });
+    const old = { ...m, platforms: undefined, features: { cold_start: "vertex-429" } };
+    expect(withPlatform(old, undefined)).toBe(old);
+  });
+});
+
+describe("hashPick", () => {
+  const V = { id: "vertex", label: "Vertex AI", base_url: "https://gw/vertex" };
+  const R = { id: "runpod", label: "Runpod", base_url: "https://gw/runpod" };
+  const models = [{ id: "a", title: "A", type: "llm", base_url: V.base_url, model: "x", features: {}, platforms: [V, R] }];
+  it("saves a platform that comes from a link, so the tab link keeps it", () => {
+    expect(hashPick(models, parseHash("#/a@runpod"))).toEqual({ model: "a", platform: "runpod" });
+  });
+  it("ignores a link without a platform, an unknown platform and an unknown tab", () => {
+    expect(hashPick(models, parseHash("#/a"))).toBeUndefined();
+    expect(hashPick(models, parseHash("#/a@modal"))).toBeUndefined();
+    expect(hashPick(models, parseHash("#/b@runpod"))).toBeUndefined();
   });
 });

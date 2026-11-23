@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { call, curlFor, errorText } from "../api";
-import { Curl, Status, Timings, type Timing } from "../components";
+import { Curl, Status, Timings, Waiting, type Timing, type Wait } from "../components";
 import type { ModelConfig } from "../config";
 
 // Own FastAPI routes of LLM-B (deployments/llm-b-qwen35-9b-fastapi/image/app.py), one JSON answer each:
@@ -36,7 +36,7 @@ export default function LlmRoutes({ model }: { model: ModelConfig }) {
   const [busy, setBusy] = useState(false);
   const [t, setT] = useState<Timing>({});
   const [error, setError] = useState<string>();
-  const [retry, setRetry] = useState<number>();
+  const [wait, setWait] = useState<Wait>();
   const [curl, setCurl] = useState("");
   const abort = useRef<AbortController>(null);
 
@@ -55,6 +55,8 @@ export default function LlmRoutes({ model }: { model: ModelConfig }) {
     setAnswer("");
     setBusy(true);
     abort.current = new AbortController();
+    setWait({ since: Date.now() });
+    setT({}); // the timings of the last answer are wrong for this one
     const timing: Timing = {};
     let t0 = performance.now();
     try {
@@ -62,13 +64,14 @@ export default function LlmRoutes({ model }: { model: ModelConfig }) {
         model,
         route,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: abort.current.signal },
-        (n) => {
-          setRetry(n);
+        (n, reason) => {
+          setWait((w) => ({ since: w?.since ?? Date.now(), attempt: n, reason }));
           timing.retries = n;
           t0 = performance.now(); // time the call that answers, not the wait for the cold start
         },
+        { retryTimeouts: true }, // a chat request can be sent again; a cold start can outlast the gateway time limit
       );
-      setRetry(undefined);
+      setWait(undefined); // the answer has started: headers come only from a ready replica
       timing.status = res.status;
       if (!res.ok) throw new Error(await errorText(res));
       const j = await res.json();
@@ -77,7 +80,7 @@ export default function LlmRoutes({ model }: { model: ModelConfig }) {
     } catch (e) {
       if (!abort.current?.signal.aborted) setError(String(e));
     } finally {
-      setRetry(undefined);
+      setWait(undefined);
       setT({ ...timing });
       setBusy(false);
     }
@@ -130,7 +133,8 @@ export default function LlmRoutes({ model }: { model: ModelConfig }) {
         </div>
       </div>
       <div className="result">
-        <Status error={error} retry={retry} />
+        <Status error={error} />
+        <Waiting wait={wait} model={model} />
         {answer && <pre className="answer">{answer}</pre>}
         <Timings t={t} firstLabel="Answer" />
         <Curl text={curl} />

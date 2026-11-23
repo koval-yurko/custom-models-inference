@@ -1,24 +1,36 @@
 import { useEffect, useState } from "react";
-import { getApiKey, loadModels, parseHash, setApiKey, type ModelConfig } from "./config";
+import { PlatformPicker } from "./components";
+import { choosePlatform, getApiKey, hashPick, getPlatform, loadModels, parseHash, setApiKey, setPlatform, withPlatform, type ModelConfig } from "./config";
 import { PANELS } from "./panels";
-
-const hashId = () => parseHash(location.hash).tab;
 
 export default function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [error, setError] = useState<string>();
-  const [active, setActive] = useState(hashId());
+  const [hash, setHash] = useState(parseHash(location.hash));
+  const active = hash.tab;
+  const [picks, setPicks] = useState<Record<string, string>>({}); // platform per model id, this session (else localStorage)
   const [key, setKey] = useState(getApiKey());
   const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     loadModels().then(setModels, (e) => setError(String(e)));
-    const onHash = () => setActive(hashId());
+    const onHash = () => setHash(parseHash(location.hash));
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
+  // A platform from a link is saved like a click, so the tab link and a reload keep it.
+  useEffect(() => {
+    const p = hashPick(models, hash);
+    if (p && picks[p.model] !== p.platform) (setPlatform(p.model, p.platform), setPicks((x) => ({ ...x, [p.model]: p.platform })));
+  }, [models, hash]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const current = models.find((m) => m.id === active) ?? models[0];
+  const pick = (id: string, platform: string) => {
+    setPlatform(id, platform);
+    setPicks((p) => ({ ...p, [id]: platform }));
+    location.hash = `#/${encodeURIComponent(id)}@${encodeURIComponent(platform)}`;
+  };
 
   return (
     <>
@@ -50,12 +62,20 @@ export default function App() {
         {/* Every panel stays mounted, so a tab keeps its chat and audio when you switch. */}
         {models.map((m) => {
           const Panel = PANELS[m.type];
+          // The hash platform counts only for its own tab; a link without @platform (STT file link) keeps the stored choice.
+          const chosen = choosePlatform(m, hash.tab === m.id ? hash.platform : undefined, picks[m.id] ?? getPlatform(m.id));
+          const model = withPlatform(m, chosen);
           return (
             <div key={m.id} hidden={m !== current}>
               <h1>
-                {m.title} <small>{m.type} · {m.model} · {m.base_url}</small>
+                {m.title} <small>{m.type} · {m.model} · {chosen ? `${chosen.label} · ` : ""}{model.base_url}</small>
               </h1>
-              {Panel ? <Panel model={m} /> : <p className="error">No panel for type "{m.type}" yet. Add one with the model-ui skill.</p>}
+              {chosen && m.platforms!.length >= 2 && <PlatformPicker platforms={m.platforms!} value={chosen.id} onChange={(p) => pick(m.id, p)} />}
+              {chosen?.cold_start === "hold" && (
+                <p className="info">{chosen.label} holds the request until a replica is ready. The first call can take several minutes; the chat shows the wait and sends again after a gateway time limit.</p>
+              )}
+              {/* key stays the model id, so a chat is kept when the user switches platform */}
+              {Panel ? <Panel model={model} /> : <p className="error">No panel for type "{m.type}" yet. Add one with the model-ui skill.</p>}
             </div>
           );
         })}

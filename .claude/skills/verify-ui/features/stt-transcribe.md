@@ -41,3 +41,4 @@ Preconditions:
 - The mock keeps files in memory. `down` and `up` start with an empty list.
 - The mock `PUT` route needs no API key, as a real signed GCS URL. The browser sends it with plain `fetch`.
 - A pass here proves the UI logic. It does not prove the real files service, GCS, the GCS CORS rule or the model.
+- The STT mock tab has 2 platforms. With the default platform, `mock.log` shows each API path with the `/vertex` prefix (for example `POST /vertex/v1beta/uploads`). The signed URLs (`/mock-upload/`, `/mock-audio/`) have no prefix.

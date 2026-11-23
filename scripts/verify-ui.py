@@ -68,15 +68,29 @@ def checks(st):
     out.append((code == 200 and "<title>" in body, f"Vite serves the UI at {ui}/ (HTTP {code})"))
     code, body = http(f"{ui}/models.json")
     try:
-        urls = {m["base_url"] for m in json.loads(body)["models"]}
+        models = json.loads(body)["models"]
+        urls = {m["base_url"] for m in models}
+        purls = [p["base_url"] for m in models for p in m.get("platforms", [])]
     except (ValueError, KeyError, TypeError):
-        urls = set()
+        urls, purls = set(), ["?"]
     out.append((urls == {mock}, f"models.json of this run points every tab to {mock} (found {sorted(urls) or 'nothing'})"))
+    out.append((all(u.startswith(mock + "/") for u in purls), f"models.json of this run points every platform to {mock}/<id>"))
     code, _ = http(f"{mock}/v1/audio/voices", key=KEY)
     out.append((code == 200, f"mock answers with key '{KEY}' (HTTP {code})"))
+    code, _ = http(f"{mock}/runpod/v1/audio/voices", key=KEY)
+    out.append((code == 200, f"mock answers on a platform path /runpod/... (HTTP {code})"))
     code, _ = http(f"{mock}/v1/audio/voices", key="wrong")
     out.append((code == 403, f"mock rejects a wrong key (HTTP {code})"))
     return out
+
+
+def point_to_mock(cfg, mock):
+    """models.mock.json -> this run's config: every tab on the mock, every platform on <mock>/<id> (the mock drops the prefix)."""
+    for m in cfg["models"]:
+        m["base_url"] = mock
+        for p in m.get("platforms", []):
+            p["base_url"] = f"{mock}/{p['id']}"
+    return cfg
 
 
 def up():
@@ -94,9 +108,7 @@ def up():
     mock = f"http://127.0.0.1:{mock_port}"
     if MODELS.exists():  # restore it in `down`, so a developer's own config survives the run
         shutil.copy2(MODELS, run_dir / "models.json.backup")
-    cfg = json.loads((UI / "public" / "models.mock.json").read_text())
-    for m in cfg["models"]:
-        m["base_url"] = mock
+    cfg = point_to_mock(json.loads((UI / "public" / "models.mock.json").read_text()), mock)
     MODELS.write_text(json.dumps(cfg, indent=1))
     shutil.copy2(MODELS, run_dir / "models.json")
 

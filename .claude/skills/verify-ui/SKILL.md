@@ -92,6 +92,6 @@ Run `down` after a failed attempt too, so no process keeps a port. Old run dirs 
 ## Helpers
 
 - `scripts/verify-ui.py up | doctor | down`: see above. Python 3 standard library only. It needs `node`, `npm` and `lsof`.
-- `ui/mock-server.mjs`: `MOCK_PORT=<port> node ui/mock-server.mjs` (default 5181). It logs one line per request: time, method, path, then the body, or `403 bad key` for a rejected key. When you add a panel for a new model type, add its routes here (see the `model-ui` skill) and add a feature file to `features/`.
+- `ui/mock-server.mjs`: `MOCK_PORT=<port> node ui/mock-server.mjs` (default 5181). It logs one line per request: time, method, path, then the body, or `403 bad key` for a rejected key. A path can start with a platform prefix (`/vertex`, `/runpod`). The mock gives the same answer without the prefix, but the log keeps it, so the log shows which platform the UI called. When you add a panel for a new model type, add its routes here (see the `model-ui` skill) and add a feature file to `features/`.
 
 After the app changes, keep `features/` current with the pstack skill `/pstack:maintain-verification-skill`.

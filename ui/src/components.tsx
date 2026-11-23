@@ -1,4 +1,7 @@
 // Parts that every panel uses.
+import { useEffect, useState } from "react";
+import { waitText, type RetryReason } from "./api";
+import type { ModelConfig, Platform } from "./config";
 
 export interface Timing {
   status?: number;
@@ -62,4 +65,39 @@ export function Status({ error, retry }: { error?: string; retry?: number }) {
   if (error) return <p className="error">{error}</p>;
   if (retry) return <p className="info">Model is starting (HTTP 429)… retry {retry}/60, every 30 s. Press Stop to cancel.</p>;
   return null;
+}
+
+/** Platform buttons above a panel (only for a model with 2 or more platforms). */
+export function PlatformPicker({ platforms, value, onChange }: { platforms: Platform[]; value: string; onChange: (id: string) => void }) {
+  return (
+    <div className="platforms" role="group" aria-label="Platform">
+      Platform:
+      {platforms.map((p) => (
+        <button key={p.id} aria-pressed={p.id === value} className={p.id === value ? "active" : ""} onClick={() => onChange(p.id)}>
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** While a request waits for its first answer byte: the time, the attempt and the reason (cold start, 429, gateway time limit). */
+export type Wait = { since: number; attempt?: number; reason?: RetryReason };
+
+export function Waiting({ wait, model }: { wait?: Wait; model: ModelConfig }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!wait) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [wait]);
+  if (!wait) return null;
+  const text = waitText({
+    elapsedMs: Math.max(0, now - wait.since),
+    coldStart: model.features.cold_start,
+    label: model.features.platform_label as string | undefined,
+    attempt: wait.attempt,
+    reason: wait.reason,
+  });
+  return text ? <p className="info" role="status">{text}</p> : null;
 }

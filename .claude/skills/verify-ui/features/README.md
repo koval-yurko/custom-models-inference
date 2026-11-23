@@ -6,7 +6,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - `./scripts/verify-ui.py up` printed `READY` and `./scripts/verify-ui.py doctor` passes.
 - The UI is at `ui_url` and the mock at `mock_url` from `.verify/ui/current.json`. Ports change on every run.
-- The mock config has 3 tabs: `tts-mock` (type `tts`), `llm-mock` (type `llm`), `stt-mock` (type `stt`, STT-A mock). All point to the mock.
+- The mock config has 4 tabs: `tts-mock` (type `tts`), `llm-mock` (type `llm`, 3 platforms), `llm-routes-mock` (type `llm-routes`), `stt-mock` (type `stt`, STT-A mock, 2 platforms). All point to the mock. A platform calls `<mock_url>/<platform id>`, and the mock drops the prefix (see `platform-picker.md`).
 - The mock accepts only the API key `test`. A new run starts with no key in the browser.
 - Never drive an instance that this run did not start.
 

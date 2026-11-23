@@ -1,4 +1,4 @@
-// Local stand-in for the model gateways (TTS, LLM, STT), for UI work without GCP: npm run mock (port 5181 or MOCK_PORT, key "test").
+// Local stand-in for the model gateways (TTS, LLM, STT; every route also with a /vertex or /runpod prefix), for UI work without GCP: npm run mock (port 5181 or MOCK_PORT, key "test").
 // It answers the CORS preflight like Kokoro and vLLM do. Extend it when you add a panel for a new type.
 import http from "node:http";
 import { execFileSync } from "node:child_process";
@@ -24,9 +24,15 @@ function gemini(j, run = 0) {
   const text = turns.map((x) => x[2]).join("\n");
   return { id: crypto.randomUUID(), status: "completed", model: "qwen3-asr-diar", output_text: text, audio_seconds: 6.5, setup: MOCK_SETUP, steps: [{ type: "model_output", content: [{ type: "text", text, annotations }] }] };
 }
+// Cold start of a platform (only with these env vars): the first chat call on /runpod waits MOCK_DROP_MS and
+// then answers 504 without CORS headers (like the API Gateway time limit; the browser sees a network error), the next call waits MOCK_COLD_MS and answers.
+const DROP_MS = Number(process.env.MOCK_DROP_MS ?? 0), COLD_MS = Number(process.env.MOCK_COLD_MS ?? 0);
+const coldCalls = new Map(); // platform -> chat calls so far
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "*" };
 http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(200, cors); return res.end(); }
+  const rawUrl = req.url; // the log keeps the platform prefix: proof of the platform the UI called
+  req.url = req.url.replace(/^\/(vertex|runpod)(?=\/)/, ""); // platform path prefix (gateway /<platform><route>): same answers
   if (req.method === "PUT" && req.url.startsWith("/mock-upload/")) { // the signed URL of /v1beta/uploads: no API key, like GCS
     const chunks = []; for await (const c of req) chunks.push(c);
     const n = chunks.reduce((s, c) => s + c.length, 0);
@@ -44,11 +50,11 @@ http.createServer(async (req, res) => {
     return res.end(a.subarray(from, to + 1));
   }
   if (req.headers["x-api-key"] !== "test") {
-    console.log(new Date().toISOString(), req.method, req.url, "403 bad key");
+    console.log(new Date().toISOString(), req.method, rawUrl, "403 bad key");
     res.writeHead(403, cors); return res.end("bad key");
   }
   let body = ""; for await (const c of req) body += c; const j = body ? JSON.parse(body) : {};
-  console.log(new Date().toISOString(), req.method, req.url, body.length > 2000 ? `${body.slice(0, 200)}… (${body.length} chars)` : body); // request log: proof that the UI call reached the mock
+  console.log(new Date().toISOString(), req.method, rawUrl, body.length > 2000 ? `${body.slice(0, 200)}… (${body.length} chars)` : body); // request log: proof that the UI call reached the mock
   if (req.url === "/v1/audio/voices") { // Kokoro shape
     res.writeHead(200, { ...cors, "Content-Type": "application/json" });
     return res.end(JSON.stringify({ voices: [{ id: "af_heart", name: "af_heart" }, { id: "am_adam", name: "am_adam" }] }));
@@ -62,6 +68,11 @@ http.createServer(async (req, res) => {
     return res.end();
   }
   if (req.url === "/v1/chat/completions") {
+    const platform = rawUrl.match(/^\/(runpod)\//)?.[1];
+    const n = platform ? (coldCalls.get(platform) ?? 0) : 9;
+    if (platform) coldCalls.set(platform, n + 1);
+    if (n === 0 && DROP_MS) { await new Promise(r => setTimeout(r, DROP_MS)); console.log(new Date().toISOString(), "mock cold start: 504 without CORS", rawUrl); res.writeHead(504); return res.end("upstream request timeout"); }
+    if (n <= 1 && COLD_MS) { console.log(new Date().toISOString(), "mock cold start: hold", COLD_MS, "ms", rawUrl); await new Promise(r => setTimeout(r, COLD_MS)); }
     const words = `Echo: ${j.messages.at(-1).content}. The sea is wide and deep.`.split(" ");
     if (!j.stream) { res.writeHead(200, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { content: words.join(" ") } }], usage: { completion_tokens: words.length } })); }
     res.writeHead(200, { ...cors, "Content-Type": "text/event-stream" });

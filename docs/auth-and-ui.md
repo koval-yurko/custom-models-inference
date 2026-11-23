@@ -65,8 +65,10 @@ flowchart LR
 ```
 
 - One tab for each model. Tabs come from `models.json`.
+- A model on several platforms (Vertex AI, Runpod) has a platform picker above the panel. The panel then calls `<gateway>/<platform><route>`. The picker shows only the deployed platforms, and only when there are 2 or more. The choice stays in the browser and in the link (`#/<tab>@<platform>`).
 - The browser keeps the key. It is sent only to the gateways.
-- On a Vertex AI cold start, the UI retries every 30 s (up to 30 minutes).
+- On a Vertex AI or Runpod cold start (HTTP 429), the UI retries every 30 s (up to 30 minutes). Runpod often holds the request until a worker is ready. The gateway waits at most 300 s, then answers 504 without CORS headers, so the browser sees a network error. The LLM panels treat a 504, a 502 or a network error after 30 s or more as a gateway time limit and send the chat again 2 s later (up to 30 minutes in total). The STT panel does not, because a second POST starts a second run.
+- While an LLM panel waits for the first token, it shows the time, the platform, the attempt and the reason (cold start, HTTP 429, gateway time limit).
 - Local work: `cd ui && npm test && npm run build`. Mock backend: `npm run mock` and `npm run dev`.
 - To add a model tab, use the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
 - To prove a UI change in a real browser against the mock, use the `verify-ui` skill (`.claude/skills/verify-ui/SKILL.md`).
@@ -77,7 +79,7 @@ flowchart LR
 |---|---|---|
 | UI: "Failed to fetch", voices do not load | Wrong or missing key (the gateway sends a 4xx without CORS headers), old gateway URL, or CORS (LLM: the proxy is not applied) | Enter the key, click Reload voices, run `ui-deploy.py --config-only` |
 | HTTP 401 from the gateway | Wrong API key | Get the key again |
-| HTTP 429 from the LLM | Cold start (0 replicas) | Wait. The UI retries every 30 s on a 429 only. |
+| HTTP 429 from the LLM | Cold start (0 replicas) | Wait. The UI retries every 30 s. |
 | `ACCESS_TOKEN_EXPIRED` in `vertex.py` | Operation longer than 1 hour | Run it again (the script refreshes the token) |
 | Plan shows the wrong region | Stale shell or old HCP variable | `direnv reload`, `./scripts/hcp-sync.py` |
 | 401 or 403 on the LLM `POST` | The gateway SA has no `run.invoker` on the proxy, or the proxy SA has no `aiplatform.user` | Apply the deployment again. Check both roles. |
