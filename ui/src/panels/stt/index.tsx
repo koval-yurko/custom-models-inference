@@ -3,15 +3,16 @@ import { call, curlFor, errorText } from "../../api";
 import { Curl, Status, Timings, type Timing } from "../../components";
 import { parseHash, sttHash, type ModelConfig } from "../../config";
 import AllFiles from "./AllFiles";
+import Compare from "./Compare";
 import Evaluation from "./Evaluation";
 import Files from "./Files";
 import History, { type NewRun } from "./History";
 import Player from "./Player";
-import ReferenceEdit from "./ReferenceEdit";
+import RefEditor from "./RefEditor";
 import Speakers from "./Speakers";
 import Transcript from "./Transcript";
 import {
-  JSON_HDR, TIMEOUT_MSG, applyNames, bestCpwer, hasUnsavedEdits, resolveView, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, mimeOf, parseReference, refSeconds, refTime, renameRefSpeaker, when, words,
+  JSON_HDR, TIMEOUT_MSG, bestCpwer, hasUnsavedEdits, resolveView, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, mimeOf, parseReference, refSeconds, refTime, renameRefSpeaker, when, words,
   type FileRow, type Names, type RefTurn, type Reference, type Score, type SetupRow, type Summary, type Version, type View,
 } from "./lib";
 
@@ -20,7 +21,7 @@ import {
 // versions) | work area. A version shows its Transcript. The reference (optional, 1 per file) has Edit, Evaluation and
 // Speakers. Every file goes through POST /v1beta/uploads (signed PUT); each POST /v1beta/files/<id>/transcribe is a version.
 
-const REF_VIEWS: View[] = ["edit", "evaluation", "speakers"];
+const REF_VIEWS: View[] = ["evaluation", "speakers"]; // the edit page ("edit") is a full-width page of its own
 const VIEW_TITLE: Record<View, string> = { transcript: "Transcript", edit: "Edit", evaluation: "Evaluation", speakers: "Speakers" };
 
 export default function Stt({ model }: { model: ModelConfig }) {
@@ -70,17 +71,23 @@ export default function Stt({ model }: { model: ModelConfig }) {
   // detail of the previous file can still be in place in the first render after a file change: ignore it.
   const versions = detail && detail.file.id === fileId ? detail.versions : [];
   const { row, working, view, noVersions } = resolveView(versions, h, !!reference);
+  // The compare page: a = "ref" or a version, b = a version (defaults: the reference or the second newest | the working version).
+  const cmp = h.row === "compare" && !!fileId;
+  const known = (id?: string) => !!id && versions.some((v) => v.id === id);
+  const cmpB = known(h.b) ? h.b! : (working ?? "");
+  const cmpA = h.a === "ref" && reference ? "ref" : known(h.a) ? h.a! : reference ? "ref" : (versions.find((v) => v.id !== cmpB)?.id ?? "");
+  const canCompare = versions.length > 0 && (!!reference || versions.length > 1);
 
   /** Change the URL. A new file adds a history entry; a row or view change replaces it. */
-  const go = (p: { file?: string; row?: string; view?: string; v?: string }, push = false) => {
+  const go = (p: { file?: string; row?: string; view?: string; v?: string; a?: string; b?: string }, push = false) => {
     const c = hRef.current;
-    const n = { file: c.file, row: c.row, view: c.view, v: c.v, ...p };
-    const hash = sttHash(model.id, c.platform, n.file, n.row, n.view, n.v);
+    const n = { file: c.file, row: c.row, view: c.view, v: c.v, a: c.a, b: c.b, ...p };
+    const hash = sttHash(model.id, c.platform, n.file, n.row, n.view, n.v, n.row === "compare" ? { a: n.a, b: n.b } : undefined);
     if (push) location.hash = hash;
     else history.replaceState(null, "", hash), setH(parseHash(hash));
   };
   const open = (id: string) => go({ file: id, row: undefined, view: undefined, v: undefined }, true);
-  const select = (r: string) => (r === "ref" ? go({ row: "ref", view: hRef.current.row === "ref" ? hRef.current.view : "edit", v: working }) : go({ row: r, view: undefined, v: undefined }));
+  const select = (r: string) => (r === "ref" ? go({ row: "ref", view: hRef.current.row === "ref" && hRef.current.view !== "edit" ? hRef.current.view : reference ? "evaluation" : "edit", v: working }) : go({ row: r, view: undefined, v: undefined }));
 
   const get = async <T,>(path: string): Promise<T> => {
     const res = await call(model, path, { method: "GET" });
@@ -165,8 +172,9 @@ export default function Stt({ model }: { model: ModelConfig }) {
   // Full versions are fetched only when shown: the working version and the ticked ones.
   useEffect(() => {
     if (!fileId) return;
-    for (const id of [working, ...ticked].filter((x): x is string => !!x && !full[x])) fetchVersion(id).catch((e) => setError(String(e)));
-  }, [working, ticked.join(), fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const ids = cmp ? [cmpA, cmpB] : [working, ...ticked];
+    for (const id of [...new Set(ids)].filter((x): x is string => !!x && x !== "ref" && !full[x])) fetchVersion(id).catch((e) => setError(String(e)));
+  }, [working, ticked.join(), fileId, cmp, cmpA, cmpB]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (audio.current) audio.current.playbackRate = rate;
@@ -202,6 +210,8 @@ export default function Stt({ model }: { model: ModelConfig }) {
   };
   const playTurn = (version: string, turn: number, start: number, end: number) =>
     playingTurn?.version === version && playingTurn.turn === turn ? audio.current?.pause() : void startAt(start, end, { version, turn });
+  /** Play 1 part of the compare page (key: which part), only that part. A second click stops it. */
+  const playRange = (key: string, start: number, end: number) => (playingTurn?.version === key ? audio.current?.pause() : void startAt(start, end, { version: key, turn: -1 }));
   const toggle = () => (playing ? audio.current?.pause() : void startAt(audio.current?.currentTime ?? time, Infinity));
   const seek = async (s: number) => {
     const a = audio.current;
@@ -223,10 +233,12 @@ export default function Stt({ model }: { model: ModelConfig }) {
     if (i >= 0) playTurn(v.id, i, parseFloat(groups[i].start), parseFloat(groups[i].end));
   };
   // timeupdate comes about every 250 ms in Chrome, so a frame loop stops the turn on time; timeupdate covers a hidden tab.
+  const cmpRef = useRef(false);
+  cmpRef.current = cmp;
   const tick = () => {
     const a = audio.current;
     if (!a) return;
-    setTime(a.currentTime);
+    if (!cmpRef.current) setTime(a.currentTime); // the compare page shows no time: no re-render 60 times per second
     if (!a.paused && a.currentTime >= stopAt.current) a.pause();
   };
   const watch = () => {
@@ -242,21 +254,6 @@ export default function Stt({ model }: { model: ModelConfig }) {
     setFull((f) => (f[version] ? { ...f, [version]: { ...f[version], names: d.names } } : f));
   };
   const saveNames = (version: string, names: Names) => putNames(version, names).catch((e) => setError(String(e)));
-  const applyAll = async (source: { names: Names; mapping: Record<string, string> }) => {
-    try {
-      const plan: [string, Names][] = [];
-      for (const v of versions.filter((x) => x.id !== working && scores[x.id])) {
-        const n = applyNames(source, { names: (await fetchVersion(v.id)).names ?? {}, mapping: scores[v.id].mapping });
-        if (n) plan.push([v.id, n]);
-      }
-      if (!plan.length) return setNote("No other version has an empty name to fill.");
-      if (!confirm(`Save names on ${plan.length} version${plan.length === 1 ? "" : "s"}? Names that are already saved do not change.`)) return;
-      for (const [id, n] of plan) await putNames(id, n);
-      setNote(`Saved names on ${plan.length} version${plan.length === 1 ? "" : "s"}.`);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
   const putReference = async (body: Reference) => {
     const res = await call(model, `/v1beta/files/${fileId}/reference`, { method: "PUT", headers: JSON_HDR, body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`Reference: ${await errorText(res)}`);
@@ -376,12 +373,14 @@ export default function Stt({ model }: { model: ModelConfig }) {
   const tickVersion = (id: string) => setTicked((old) => (old.includes(id) ? old.filter((x) => x !== id) : [...old, id].slice(-2)));
   const partner = ticked.find((id) => id !== working);
   const shown = [working, partner].map((id) => (id ? full[id] : undefined)).filter((v): v is Version => !!v);
-  const tabs: View[] = row !== "ref" ? ["transcript"] : reference ? REF_VIEWS : ["edit"];
+  const tabs: View[] = row !== "ref" ? ["transcript"] : REF_VIEWS;
+  const editPage = !!detail && row === "ref" && view === "edit"; // the reference editor: full width, no files and history columns
+  const wide = cmp || editPage;
 
   return (
-    <section className={`stt${all ? " stt-all-view" : ""}`}>
-      <Files files={files} selected={h.file} best={best} busy={!!busy} onOpen={open} onAll={() => go({ file: "all", row: undefined, view: undefined, v: undefined }, true)} onUpload={upload} onRefresh={() => void (setError(undefined), loadFiles(), loadSetups(), fileId && loadDetail(fileId))} />
-      {!all && (
+    <section className={`stt${all ? " stt-all-view" : ""}${wide ? " stt-compare-view" : ""}`}>
+      {!wide && <Files files={files} selected={h.file} best={best} busy={!!busy} onOpen={open} onAll={() => go({ file: "all", row: undefined, view: undefined, v: undefined }, true)} onUpload={upload} onRefresh={() => void (setError(undefined), loadFiles(), loadSetups(), fileId && loadDetail(fileId))} />}
+      {!all && !wide && (
         <div className="stt-col">
           {detail ? (
             <History
@@ -406,6 +405,43 @@ export default function Stt({ model }: { model: ModelConfig }) {
       <div className="stt-work">
         {all ? (
           <AllFiles setups={setups} />
+        ) : cmp && detail ? (
+          <>
+            <Status error={error} retry={retry} />
+            <Compare
+              reference={reference}
+              versions={versions}
+              a={cmpA}
+              b={cmpB}
+              va={cmpA !== "ref" ? full[cmpA] : undefined}
+              vb={full[cmpB]}
+              playing={playingTurn?.turn === -1 ? playingTurn.version : undefined}
+              onAB={(a, b) => go({ a, b })}
+              onBack={() => go({ row: cmpB || undefined, view: undefined, v: undefined })}
+              onPlay={playRange}
+              onRenameRef={renameRef}
+              onSaveNames={putNames}
+            />
+          </>
+        ) : editPage && detail ? (
+          <>
+            <Status error={error} retry={retry} />
+            <RefEditor
+              fileName={detail.file.name}
+              text={refText}
+              language={refLang}
+              saved={reference}
+              version={working ? full[working] : undefined}
+              playing={playingTurn?.turn === -1 ? playingTurn.version : undefined}
+              onText={setRefText}
+              onLanguage={setRefLang}
+              onSave={() => void saveReference()}
+              onDraft={draftReference}
+              onImport={importRef}
+              onBack={() => go(reference ? { row: "ref", view: "evaluation" } : { row: working, view: undefined, v: undefined })}
+              onPlay={playRange}
+            />
+          </>
         ) : !detail ? (
           <>
             <p className="muted">{fileId ? "Loading the file…" : "Upload a file or pick one from the list."}</p>
@@ -418,7 +454,12 @@ export default function Stt({ model }: { model: ModelConfig }) {
               <b>{detail.file.name}</b>{" "}
               <span className="muted">
                 {(detail.file.size_bytes / 1e6).toFixed(1)} MB · {when(detail.file.created)}
-              </span>
+              </span>{" "}
+              {canCompare && (
+                <button title="Compare 2 transcripts on a full-width page" onClick={() => go({ row: "compare", view: undefined, v: undefined, a: cmpA, b: cmpB }, true)}>
+                  ⇆ Compare
+                </button>
+              )}
             </div>
             <Status error={error} retry={retry} />
             {busy && !retry && <p className="info">{busy}</p>}
@@ -431,6 +472,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
                   {VIEW_TITLE[x]}
                 </button>
               ))}
+              {row === "ref" && <button onClick={() => go({ view: "edit" })}>✎ Edit reference</button>}
             </div>
             <Player time={time} duration={duration} playing={playing} rate={rate} follow={follow} onToggle={toggle} onSeek={(s) => void seek(s)} onRate={setRate} onFollow={setFollow} />
             {view === "transcript" && (
@@ -459,19 +501,6 @@ export default function Stt({ model }: { model: ModelConfig }) {
                 </details>
               </>
             )}
-            {view === "edit" && (
-              <ReferenceEdit
-                text={refText}
-                language={refLang}
-                saved={reference}
-                version={working ? full[working] : undefined}
-                onText={setRefText}
-                onLanguage={setRefLang}
-                onSave={() => void saveReference()}
-                onDraft={draftReference}
-                onImport={importRef}
-              />
-            )}
             {view === "evaluation" && <Evaluation versions={versions} scores={scores} working={working} />}
             {view === "speakers" && reference && (
               <Speakers
@@ -480,7 +509,6 @@ export default function Stt({ model }: { model: ModelConfig }) {
                 score={working ? scores[working] : undefined}
                 onRenameRef={renameRef}
                 onSaveNames={(n) => (working ? saveNames(working, n) : Promise.resolve())}
-                onApplyAll={applyAll}
                 onPlayFirst={playFirst}
               />
             )}

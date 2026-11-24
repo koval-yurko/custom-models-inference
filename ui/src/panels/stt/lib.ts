@@ -167,18 +167,6 @@ export function previousScore(versions: Summary[], scores: Record<string, Score>
   return i < 0 ? undefined : versions.slice(i + 1).map((v) => scores[v.id]).find(Boolean);
 }
 
-/** "Apply to all versions": the names of target after a fill from source, through the reference speaker that both
- * map to. A saved name is never overwritten. null when nothing changes. */
-export function applyNames(source: { names: Names; mapping: Record<string, string> }, target: { names: Names; mapping: Record<string, string> }): Names | null {
-  const refName: Record<string, string> = {};
-  for (const [label, ref] of Object.entries(source.mapping)) if (source.names[label]?.trim()) refName[ref] = source.names[label].trim();
-  const out = { ...target.names };
-  let changed = false;
-  for (const [label, ref] of Object.entries(target.mapping))
-    if (/^spk_\d{1,2}$/.test(label) && !out[label]?.trim() && refName[ref]) (out[label] = refName[ref]), (changed = true);
-  return changed ? out : null;
-}
-
 /** Index of the last start at or before t (0 when t is before the first start, -1 for no starts). */
 export function nearestTurn(starts: number[], t: number): number {
   if (!starts.length) return -1;
@@ -188,16 +176,33 @@ export function nearestTurn(starts: number[], t: number): number {
 }
 
 export type View = "transcript" | "edit" | "evaluation" | "speakers";
-const REF_VIEWS_ALL: View[] = ["edit", "evaluation", "speakers"];
+const REF_VIEWS_ALL: View[] = ["evaluation", "speakers"];
 
 /** URL parts -> the selected row, the working version and the view, with the fallbacks of the spec ("URL"). */
 export function resolveView(versions: { id: string }[], h: { row?: string; view?: string; v?: string }, hasRef: boolean): { row: string; working?: string; view: View; noVersions: boolean } {
   const has = (id?: string) => !!id && versions.some((v) => v.id === id);
   const row = h.row === "ref" || has(h.row) ? h.row! : (versions[0]?.id ?? "ref");
   const working = row !== "ref" ? row : has(h.v) ? h.v : versions[0]?.id;
-  const view: View = row !== "ref" ? "transcript" : hasRef && REF_VIEWS_ALL.includes(h.view as View) ? (h.view as View) : "edit";
+  // The reference row: the edit page on request (or without a reference), else Evaluation or Speakers.
+  const view: View = row !== "ref" ? "transcript" : h.view === "edit" || !hasRef ? "edit" : REF_VIEWS_ALL.includes(h.view as View) ? (h.view as View) : "evaluation";
   return { row, working, view, noVersions: versions.length === 0 };
 }
 
 /** The editor text is not the saved reference (typed or imported): a reload must not replace it. */
 export const hasUnsavedEdits = (text: string, saved?: Reference) => text.trim() !== (saved ? formatReference(saved) : "").trim();
+
+/** Turn i and turn i+1 -> 1 turn: the speaker and start of i, the end of i+1 (or of i). The last turn: no change. */
+export function mergeTurns(turns: RefTurn[], i: number): RefTurn[] {
+  if (i < 0 || i >= turns.length - 1) return turns;
+  const [x, y] = [turns[i], turns[i + 1]];
+  const end = y.end ?? x.end;
+  const merged: RefTurn = { speaker: x.speaker, text: [x.text, y.text].filter((t) => t.trim()).join(" "), ...(x.start !== undefined && end !== undefined ? { start: x.start, end } : {}) };
+  return [...turns.slice(0, i), merged, ...turns.slice(i + 2)];
+}
+
+/** An empty turn after turn i (i = -1: at the top), with the speaker of turn i and its end as the times. */
+export function insertTurn(turns: RefTurn[], i: number): RefTurn[] {
+  const x = turns[i];
+  const t: RefTurn = { speaker: x?.speaker ?? turns[0]?.speaker ?? "Speaker 1", text: "", ...(x?.end !== undefined ? { start: x.end, end: x.end } : {}) };
+  return [...turns.slice(0, i + 1), t, ...turns.slice(i + 1)];
+}

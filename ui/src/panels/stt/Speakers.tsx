@@ -7,14 +7,13 @@ interface Props {
   score?: Score;
   onRenameRef: (renames: [string, string][]) => Promise<void>;
   onSaveNames: (n: Names) => Promise<void>;
-  onApplyAll: (source: { names: Names; mapping: Record<string, string> }) => Promise<void>;
   onPlayFirst: (label: string) => void;
 }
 
 const mmss = (s: number | null) => (s == null ? "–" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
 
 /** The Speakers tab: the reference speakers (rename in the reference) and the labels of the working version (names). */
-export default function Speakers({ reference, version, score, onRenameRef, onSaveNames, onApplyAll, onPlayFirst }: Props) {
+export default function Speakers({ reference, version, score, onRenameRef, onSaveNames, onPlayFirst }: Props) {
   const ids = refSummary(reference).speakers;
   const time = speechTime(reference);
   const [refDraft, setRefDraft] = useState<Record<string, string>>({});
@@ -82,9 +81,6 @@ export default function Speakers({ reference, version, score, onRenameRef, onSav
         <div className="row">
           <button disabled={busy || !labels.length || !score} onClick={() => setDraft({ ...Object.fromEntries(labels.filter((l) => mapping[l]).map((l) => [l, mapping[l]])), ...namesBody(draft) })}>
             Use the matches
-          </button>
-          <button disabled={busy || !labels.length || !score} onClick={() => void wrap(() => onApplyAll({ names: namesBody(draft), mapping }))}>
-            Apply to all versions
           </button>
           <button className="primary" disabled={busy || !labels.length} onClick={() => void wrap(() => onSaveNames(namesBody(draft)))}>
             Save

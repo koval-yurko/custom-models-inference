@@ -63,21 +63,23 @@ export const getApiKey = () => localStorage.getItem(KEY) ?? "";
 export const setApiKey = (v: string) => (v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY));
 
 /** "#/<tab>[@<platform>][/<file id>]" -> the tab id, the optional platform id and the optional file id (STT history links). */
-export function parseHash(hash: string): { tab: string; platform?: string; file?: string; row?: string; view?: string; v?: string } {
+export function parseHash(hash: string): { tab: string; platform?: string; file?: string; row?: string; view?: string; v?: string; a?: string; b?: string } {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
   const [first = "", file, row, view] = path.split("/").map(decodeURIComponent);
-  const v = new URLSearchParams(query).get("v") ?? "";
+  const q = new URLSearchParams(query);
+  const [v, a, b] = ["v", "a", "b"].map((k) => q.get(k) ?? "");
   const at = first.indexOf("@");
   const tab = at < 0 ? first : first.slice(0, at);
   const platform = at < 0 ? "" : first.slice(at + 1);
-  return { tab, ...(platform ? { platform } : {}), ...(file ? { file } : {}), ...(row ? { row } : {}), ...(view ? { view } : {}), ...(v ? { v } : {}) };
+  return { tab, ...(platform ? { platform } : {}), ...(file ? { file } : {}), ...(row ? { row } : {}), ...(view ? { view } : {}), ...(v ? { v } : {}), ...(a ? { a } : {}), ...(b ? { b } : {}) };
 }
 
-/** STT link: #/<tab>[@<platform>]/<file>[/<row>[/<view>]][?v=<version>]. Empty parts are left out. */
-export function sttHash(tab: string, platform: string | undefined, file?: string, row?: string, view?: string, v?: string): string {
+/** STT link: #/<tab>[@<platform>]/<file>[/<row>[/<view>]][?v=<version>], or .../<file>/compare?a=<ref|version>&b=<version>. Empty parts are left out. */
+export function sttHash(tab: string, platform: string | undefined, file?: string, row?: string, view?: string, v?: string, ab?: { a?: string; b?: string }): string {
   const e = encodeURIComponent;
   const parts = [platform ? `${e(tab)}@${e(platform)}` : e(tab), ...[file, file && row, file && row && view].filter(Boolean).map((x) => e(x!))];
-  return `#/${parts.join("/")}${v && file ? `?v=${e(v)}` : ""}`;
+  const q = new URLSearchParams(Object.entries({ v, a: ab?.a, b: ab?.b }).filter((x): x is [string, string] => !!x[1] && !!file)).toString();
+  return `#/${parts.join("/")}${q ? `?${q}` : ""}`;
 }
 
 /** The platform the tab calls: the hash id if the model has it, else the stored id if it has it, else the first. */

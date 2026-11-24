@@ -2,6 +2,8 @@
 
 Date: 2026-11-24. Status: layout approved by the user in chat (3 rounds of mockups). This document waits for approval.
 
+Changes after use (user, 2026-11-24): "Apply to all versions" is removed. The reference Edit tab is replaced by a full-width editor page (`.../ref/edit`, `RefEditor.tsx`): 1 card per turn, a speaker bar, add, merge and delete, and a raw text mode. The reference row opens Evaluation by default. Word-level comparison is on the compare page (`docs/specs/2026-11-24-stt-compare-design.md`). The sections below keep the first design.
+
 ## Intent
 
 The STT tab of the test UI (`ui/src/panels/Stt.tsx`) uses the space badly. The page grid is `3fr 2fr` (`.panel` in `ui/src/styles.css`). The left 60 % holds only the upload field, the file list and the "Accuracy per setup" table. The right 40 % holds the file header, the run settings, a version table with 12 columns, the reference editor, the speaker names and the transcripts. At 1440 px each version row wraps to about 6 lines, and the transcripts start below the fold.

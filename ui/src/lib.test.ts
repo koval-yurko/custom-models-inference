@@ -4,7 +4,7 @@ import { pcm16ToFloat32, wavFromPcm } from "./audio";
 import { choosePlatform, hashPick, parseHash, parseModels, sttHash, withPlatform } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
 import {
-  applyNames, bestCpwer, hasUnsavedEdits, resolveView, clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, namesBody, nearestTurn, parseReference, previousScore, refSeconds,
+  bestCpwer, hasUnsavedEdits, insertTurn, mergeTurns, resolveView, clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, namesBody, nearestTurn, parseReference, previousScore, refSeconds,
   refSummary, refTime, renameRefSpeaker, scoreTone, speakerCount, speakerName, speechTime, speechmaticsToReference, type Score, type Summary,
 } from "./panels/stt/lib";
 import { voiceIds } from "./panels/Tts";
@@ -241,6 +241,10 @@ describe("parseHash", () => {
     expect(parseHash("#/stt-mock@runpod/f1/20261124T101200")).toEqual({ tab: "stt-mock", platform: "runpod", file: "f1", row: "20261124T101200" });
     expect(parseHash("#/stt-mock/all")).toEqual({ tab: "stt-mock", file: "all" });
   });
+  it("reads and builds the compare link", () => {
+    expect(parseHash("#/stt-mock/f1/compare?a=ref&b=v2")).toEqual({ tab: "stt-mock", file: "f1", row: "compare", a: "ref", b: "v2" });
+    expect(sttHash("stt-mock", undefined, "f1", "compare", undefined, undefined, { a: "ref", b: "v2" })).toBe("#/stt-mock/f1/compare?a=ref&b=v2");
+  });
   it("builds an STT hash and leaves out empty parts", () => {
     expect(sttHash("stt-mock", undefined, "f1", "ref", "speakers", "v9")).toBe("#/stt-mock/f1/ref/speakers?v=v9");
     expect(sttHash("stt-mock", "runpod", "f1")).toBe("#/stt-mock@runpod/f1");
@@ -445,18 +449,6 @@ describe("scores", () => {
   });
 });
 
-describe("applyNames", () => {
-  const source = { names: { spk_1: "Alice", spk_2: "Bob" }, mapping: { spk_1: "S1", spk_2: "S2" } };
-  it("fills empty names of labels that map to the same reference speaker", () => {
-    expect(applyNames(source, { names: {}, mapping: { spk_1: "S2", spk_2: "S1", spk_3: "S5" } })).toEqual({ spk_1: "Bob", spk_2: "Alice" });
-  });
-  it("never overwrites a saved name, and returns null when nothing changes", () => {
-    expect(applyNames(source, { names: { spk_1: "Carol" }, mapping: { spk_1: "S1", spk_2: "S2" } })).toEqual({ spk_1: "Carol", spk_2: "Bob" });
-    expect(applyNames(source, { names: { spk_1: "Alice" }, mapping: { spk_1: "S1" } })).toBeNull();
-    expect(applyNames(source, { names: {}, mapping: { "": "S1" } })).toBeNull(); // no speaker labels (diarization off)
-  });
-});
-
 describe("nearestTurn", () => {
   it("finds the last turn that starts at or before t", () => {
     expect(nearestTurn([0, 5, 10], 7)).toBe(1);
@@ -477,6 +469,33 @@ describe("resolveView", () => {
   it("keeps the working version on the reference row; Edit only without a reference", () => {
     expect(resolveView(vs, { row: "ref", view: "speakers", v: "v1" }, true)).toEqual({ row: "ref", working: "v1", view: "speakers", noVersions: false });
     expect(resolveView(vs, { row: "ref", view: "speakers", v: "x" }, false)).toEqual({ row: "ref", working: "v2", view: "edit", noVersions: false });
+  });
+});
+
+describe("resolveView, reference row", () => {
+  const vs = [{ id: "v2" }, { id: "v1" }];
+  it("opens Evaluation by default when the file has a reference, and the edit page only on request", () => {
+    expect(resolveView(vs, { row: "ref" }, true).view).toBe("evaluation");
+    expect(resolveView(vs, { row: "ref", view: "edit" }, true).view).toBe("edit");
+    expect(resolveView(vs, { row: "ref", view: "transcript" }, true).view).toBe("evaluation");
+  });
+});
+
+describe("turn editing", () => {
+  const ts = [
+    { speaker: "A", text: "one", start: "00:00:00.0", end: "00:00:01.0" },
+    { speaker: "B", text: "two", start: "00:00:01.5", end: "00:00:02.0" },
+    { speaker: "A", text: "three" },
+  ];
+  it("merges a turn with the next one: its speaker and start, the next end", () => {
+    expect(mergeTurns(ts, 0)).toEqual([{ speaker: "A", text: "one two", start: "00:00:00.0", end: "00:00:02.0" }, ts[2]]);
+    expect(mergeTurns(ts, 1)).toEqual([ts[0], { speaker: "B", text: "two three", start: "00:00:01.5", end: "00:00:02.0" }]);
+    expect(mergeTurns(ts, 2)).toBe(ts); // the last turn has no next turn
+  });
+  it("inserts an empty turn of the same speaker after a turn, starting at its end", () => {
+    expect(insertTurn(ts, 0)[1]).toEqual({ speaker: "A", text: "", start: "00:00:01.0", end: "00:00:01.0" });
+    expect(insertTurn(ts, 2)[3]).toEqual({ speaker: "A", text: "" });
+    expect(insertTurn([], -1)).toEqual([{ speaker: "Speaker 1", text: "" }]);
   });
 });
 
