@@ -80,12 +80,12 @@ Before the first Runpod apply: make a Runpod S3 API key (Runpod console, Setting
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
    ```
-4. Apply. It makes the Vertex AI endpoint, the Runpod volume, template and endpoint, the gateway, the CORS proxy, the STT API service and the Slack alerts.
+4. Apply. Step 1 (`hcp-sync.py`) made the Runpod secrets `slack_bot_token` and `slack_channel` (see [Runpod (own images: Slack from the container)](../../infra/README.md#runpod-own-images-slack-from-the-container)). Without them, the worker sends no Slack message. The apply makes the Vertex AI endpoint, the Runpod volume, template and endpoint, the gateway, the CORS proxy, the STT API service and the Slack alerts.
    ```sh
    cd deployments/stt-a-qwen3-asr-diar && terraform init && terraform apply && cd ../..
    ```
@@ -111,14 +111,14 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
    gcloud artifacts docker images list $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models --include-tags \
      --filter="package~stt-a-qwen3-asr-diar" --format="table(package,tags)"
    ```
-   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.2` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
+   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.3` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
 2. Undeploy the GPU model. The model upload holds the image tag, so a new image needs a new upload.
    ```sh
    ./scripts/deploy.py undeploy deployments/stt-a-qwen3-asr-diar
@@ -224,7 +224,7 @@ curl -s "$GW/v1beta/files/$ID/versions/$V/score" -H "x-api-key: $KEY" | python3 
 curl -s "$GW/v1beta/scores" -H "x-api-key: $KEY" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['setups'], indent=1))"
 ```
 
-Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.2` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
+Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.3` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
 
 Delete a stored file by hand (there is no delete route): `gcloud storage rm -r gs://$GCP_PROJECT_ID-stt-audio/files/<id>/`.
 
@@ -265,7 +265,7 @@ Real-time factor (processing time / audio length) through the gateway, warm:
 
 Send no requests for about 15 minutes (idle time 300 s plus the check interval). Then the replica count must be `0`: open the endpoint in the console (Vertex AI > Online prediction > Endpoints) and look at the replica chart. The next call must return `429` first.
 
-Slack: after a cold start, the channel gets `🟢 STT-A Qwen3 ASR + speakers is ready`. After the scale down, it gets `⚪ STT-A Qwen3 ASR + speakers scaled to 0`. For Runpod, the `infra/core` job `scale-watch` sends `STT-A Qwen3 ASR + speakers on Runpod` messages (it checks every minute). See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack). The STT API service is CPU only and has no alerts.
+Slack: after a cold start, the channel gets `🟢 STT-A Qwen3 ASR + speakers is ready`. After the scale down, it gets `⚪ STT-A Qwen3 ASR + speakers scaled to 0`. For Runpod, the container itself posts `🟢 STT-A Qwen3 ASR + speakers on Runpod is ready` after the 3 models load, and `⚪ STT-A Qwen3 ASR + speakers on Runpod scaled to 0` at its shutdown. It needs the Runpod secrets `slack_bot_token` and `slack_channel`. See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack). The STT API service is CPU only and has no alerts.
 
 ## Destroy
 

@@ -10,8 +10,10 @@ Run with 1 process only: each process loads all 3 models. Spec: docs/specs/2026-
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import traceback
+import urllib.request
 from contextlib import asynccontextmanager
 from typing import Callable
 
@@ -31,6 +33,24 @@ except ImportError:  # unit tests run without the model packages
 SETUP = {k: os.environ.get(f"SETUP_{k.upper()}", "") for k in ("asr", "aligner", "diarization", "image_tag", "platform")}
 
 
+def slack(text: str) -> None:
+    """Post 1 Slack message. Runpod only: the adapter sets SLACK_BOT_TOKEN (Runpod writes no logs to GCP, so the
+    log-based alerts cannot see it). A failure is only printed: it must never stop the models."""
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        return
+    body = json.dumps({"channel": os.environ.get("SLACK_CHANNEL", ""), "text": text}).encode()
+    req = urllib.request.Request("https://slack.com/api/chat.postMessage", data=body, headers={
+        "Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            answer = json.load(r)
+        if not answer.get("ok"):
+            print(f"slack: {answer.get('error')}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"slack: {e}", flush=True)
+
+
 def port(environ) -> int:
     """PORT (container contract, the Runpod adapter sets it), else AIP_HTTP_PORT (Vertex AI), else 8080."""
     return int(environ.get("PORT") or environ.get("AIP_HTTP_PORT") or "8080")
@@ -38,6 +58,7 @@ def port(environ) -> int:
 
 def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
     state: dict = {"models": None}
+    title = os.environ.get("SLACK_TITLE", "STT-A")
     lock = asyncio.Lock()  # 1 request at a time on the GPU
 
     async def boot():
@@ -45,6 +66,7 @@ def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
         try:
             state["models"] = await asyncio.to_thread(load)
             print("models ready", flush=True)  # scale-alerts reads this line
+            await asyncio.to_thread(slack, f"🟢 {title} is ready")
         except Exception:  # noqa: BLE001 - exit, so the error is in the log and the container restarts. Not CancelledError: that is a normal shutdown
             traceback.print_exc()
             os._exit(1)
@@ -54,6 +76,8 @@ def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
         task = asyncio.create_task(boot())
         yield
         task.cancel()
+        if state["models"] is not None:
+            slack(f"⚪ {title} scaled to 0")  # uvicorn runs this at SIGTERM; a SIGKILL sends nothing
 
     app = FastAPI(title="stt-a-qwen3-asr-diar", lifespan=lifespan)
 

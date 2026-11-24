@@ -5,6 +5,7 @@ Run from anywhere:  ./scripts/hcp-sync.py [--dry-run]   (it loads the repo .env 
 Needs: TF_CLOUD_ORGANIZATION, TF_CLOUD_PROJECT, TF_TOKEN_app_terraform_io, GOOGLE_APPLICATION_CREDENTIALS.
 Creates the workspaces if missing, sets remote execution, and upserts the variables. Never prints values.
 Every workspace also gets RUNPOD_API_KEY as a sensitive env var (the runpod provider fails without a key).
+It also creates or updates the Runpod account secrets in RUNPOD_SECRETS (Runpod REST v2; the provider has no secret resource).
 """
 import json, os, pathlib, sys, urllib.request, urllib.error
 
@@ -53,6 +54,9 @@ WORKSPACES = {
 }
 # Env vars for every workspace: the GPU platform providers read their key from it (they fail without one).
 PROVIDER_KEYS = {"RUNPOD_API_KEY": E("RUNPOD_API_KEY")}
+# Runpod account secret -> .env value. Runpod templates read them as {{ RUNPOD_SECRET_<name> }} (own images: Slack messages).
+RUNPOD_SECRETS = {"slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL")}
+RUNPOD_API = "https://api.runpod.io/v2/account/secrets"
 SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "runpod_s3_access_key", "runpod_s3_secret_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
 
 
@@ -64,6 +68,35 @@ def api(method, path, body=None):
             return json.load(r) if r.length != 0 else {}
     except urllib.error.HTTPError as e:
         sys.exit(f"HCP API {method} {path} failed: {e.code} {e.read().decode()[:300]}")
+
+
+def runpod(method, path="", body=None):
+    req = urllib.request.Request(RUNPOD_API + path, method=method, data=json.dumps(body).encode() if body else None,
+                                 headers={"Authorization": f"Bearer {E('RUNPOD_API_KEY')}", "Content-Type": "application/json",
+                                          "User-Agent": "custom-models-hcp-sync"})  # Cloudflare blocks the Python-urllib agent
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r) if r.length != 0 else {}
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Runpod API {method} /v2/account/secrets{path} failed: {e.code} {e.read().decode()[:300]}")
+
+
+def sync_runpod_secrets(call=runpod):
+    """Create each missing secret of RUNPOD_SECRETS, and set the .env value on each existing one. A worker reads it at start."""
+    if not E("RUNPOD_API_KEY"):
+        print("runpod secrets: skipped (no RUNPOD_API_KEY)")
+        return
+    ids = {s["name"]: s["id"] for s in call("GET").get("secrets", [])}
+    for name, value in RUNPOD_SECRETS.items():
+        if not value:
+            continue
+        print(f"runpod secret:{name} (sensitive) [{'update' if name in ids else 'create'}]")
+        if DRY:
+            continue
+        if name in ids:
+            call("PATCH", f"/{ids[name]}", {"value": value})
+        else:
+            call("POST", "", {"name": name, "value": value})
 
 
 def find_project():
@@ -125,6 +158,7 @@ def main():
         for k, v in tfvars.items():
             if v:
                 upsert(ws, existing, k, v, "terraform")
+    sync_runpod_secrets()
     print("Done." + (" (dry run, nothing changed)" if DRY else ""))
 
 

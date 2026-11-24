@@ -37,9 +37,9 @@ Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway
    ```sh
    gcloud builds submit deployments/llm-b-qwen35-9b-fastapi/image \
      --config=deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3 --region=$GCP_REGION
    ```
-3. Apply. It makes the Vertex AI endpoint, the Runpod volumes, template and endpoint, the CORS proxy and the gateway.
+3. Apply. Step 0 (`hcp-sync.py`) made the Runpod secrets `slack_bot_token` and `slack_channel` (see [Runpod (own images: Slack from the container)](../../infra/README.md#runpod-own-images-slack-from-the-container)). Without them, the worker sends no Slack message. The apply makes the Vertex AI endpoint, the Runpod volumes, template and endpoint, the CORS proxy and the gateway.
    ```sh
    cd deployments/llm-b-qwen35-9b-fastapi && terraform init && terraform apply && cd ../..
    ```
@@ -62,7 +62,7 @@ To change the code: raise `image_tag` in `variables.tf` and build with the new `
 
 ## First plan after the move to the model module (2026-11-24)
 
-The resources moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` into `infra/modules/model` (`moved.tf`, and `infra/modules/platform-vertex/moved.tf` for the last step). Build the image `0.2.0` first (step 2). Then run a plan and read it before you apply:
+The resources moved from `vertex-model`, `gateway.tf` and `cors_proxy.tf` into `infra/modules/model` (`moved.tf`, and `infra/modules/platform-vertex/moved.tf` for the last step). Build the image `0.2.1` first (step 2). Then run a plan and read it before you apply:
 
 ```sh
 cd deployments/llm-b-qwen35-9b-fastapi && terraform init && terraform plan
@@ -73,7 +73,7 @@ Expected:
 - Moves only (`has moved to`): the endpoint, its service account and bucket IAM member, the CORS proxy module, the gateway service account, the API config, the gateway, and `module.scale_alerts` to `module.scale_alerts[0]`. If the state still has `google_project_iam_member.predict` without an index, it also moves to `predict[0]` (a `moved` block of the proxy module).
 - A new API config (the paths `/vertex/...` and `/runpod/...`, and `x-google-backend` on each operation), the old API config destroyed after it, and the gateway updated in place.
 - An in-place update of the proxy service `llm-b-qwen35-fastapi-proxy` (env `TARGETS`, the Runpod key secret, the timeout).
-- New: 3 Runpod volumes, the Runpod template and endpoint, the `secretAccessor` member of the proxy SA on the secret `runpod-api-key`, and the Runpod Slack alerts (`module.platform_alerts["runpod"]`).
+- New: 3 Runpod volumes, the Runpod template and endpoint, the `secretAccessor` member of the proxy SA on the secret `runpod-api-key`. No Runpod Slack alert: the container posts its own messages.
 - No replace of `google_vertex_ai_endpoint`, `google_api_gateway_gateway` or a service account. If the plan shows one, stop and check `moved.tf` against `terraform state list`.
 
 After the apply, do steps 4 to 6 of [Deploy](#deploy). The deployed Vertex AI model keeps the image `0.1.1` until the next `undeploy` and `deploy`; `0.1.1` works on Vertex AI.
@@ -134,7 +134,7 @@ Write the results here after each measured cold start. "Cold start" is the time 
 
 Send no requests for about 15 minutes (idle time 300 s plus the check interval). Then the replica count must be `0`: open the endpoint in the console (Vertex AI > Online prediction > Endpoints) and look at the replica chart. The next call must return `429` first.
 
-Slack: after a cold start, the channel gets `🟢 LLM-B Qwen3.5 9B is ready`. After the scale down, it gets `⚪ LLM-B Qwen3.5 9B scaled to 0` (300 s idle time, then the shutdown). See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack).
+Slack: after a cold start, the channel gets `🟢 LLM-B Qwen3.5 9B is ready`. After the scale down, it gets `⚪ LLM-B Qwen3.5 9B scaled to 0` (300 s idle time, then the shutdown). For Runpod, the container itself posts `🟢 LLM-B Qwen3.5 9B on Runpod is ready` after the engine loads, and `⚪ LLM-B Qwen3.5 9B on Runpod scaled to 0` at its shutdown. It needs the Runpod secrets `slack_bot_token` and `slack_channel`. See [Scale notifications (Slack)](../../infra/README.md#scale-notifications-slack).
 
 ## Destroy
 

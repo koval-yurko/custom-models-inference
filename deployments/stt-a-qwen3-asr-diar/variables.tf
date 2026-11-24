@@ -12,7 +12,7 @@ variable "region" {
 variable "image_tag" {
   description = "Tag of the GPU image that services/speech_engine/cloudbuild.yaml pushed to the models repo. Change it for each new build."
   type        = string
-  default     = "0.2.2"
+  default     = "0.2.3"
 }
 
 variable "stt_api_image_tag" {

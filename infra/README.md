@@ -548,9 +548,21 @@ flowchart LR
     class P ext
 ```
 
+### Runpod (own images: Slack from the container)
+
+Runpod writes no logs to GCP, so the alerts above cannot see it. The own images of STT-A and LLM-B post their Slack messages themselves. LLM-A (stock vLLM image) uses the job `scale-watch` of the next section.
+
+1. The Runpod adapter env of the deployment (`platform_options.runpod.env` in `main.tf`) sets `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` and `SLACK_TITLE`. The token and the channel come from the Runpod secrets `slack_bot_token` and `slack_channel` (`{{ RUNPOD_SECRET_<name> }}`). Vertex AI gets no `SLACK_*` env, so the container sends nothing there.
+2. After the model loads, the container posts `🟢 <SLACK_TITLE> is ready` with `chat.postMessage`. So "ready" means the model can answer, not only that the GPU worker started.
+3. At SIGTERM, uvicorn runs the shutdown of the app, and the container posts `⚪ <SLACK_TITLE> scaled to 0`. It posts this only after a "ready" message.
+4. A failed post only prints `slack: <error>` in the worker log. The model keeps running.
+5. Limits: a SIGKILL or a crash sends no "scaled to 0". The Runpod docs do not say if a load balancing worker gets SIGTERM at scale down, so check the first scale down in Slack. Cost: 0 (no poll).
+
+`./scripts/hcp-sync.py` makes the 2 Runpod secrets from `.env`: `slack_bot_token` from `SLACK_BOT_TOKEN`, and `slack_channel` from `SLACK_CHANNEL`. The Runpod provider has no secret resource, so the script uses the Runpod REST API (`/v2/account/secrets`). It creates a missing secret and sets the value of an existing one on each run. `--dry-run` only reads the secret names. Run it before the apply of STT-A or LLM-B. To rotate the token, change `.env` and run the script again. A new worker reads the new value at start.
+
 ### Runpod (job scale-watch)
 
-Runpod writes no logs to GCP, so the alerts above cannot see it. `infra/core/scale_watch.tf` adds the Cloud Run job `scale-watch`. Cloud Scheduler starts it every minute.
+`infra/core/scale_watch.tf` adds the Cloud Run job `scale-watch`. Cloud Scheduler starts it every minute.
 
 1. The job (`infra/core/scale_watch.py`, standard library only) reads every Runpod endpoint (`GET https://api.runpod.io/v2/serverless` and `/<id>/workers`) Up workers: the workers with status `IDLE` or `RUNNING` and an `uptimeSeconds` (a stopped FlashBoot worker stays in the list as `IDLE` without it). The state keys are `<platform>/<id>`, so another platform needs only one more read function.
 2. An endpoint with an up worker counts as ready only when its `/health` (the `requestUrls.health` of the endpoint) answers `200`. A worker is up minutes before the model loads. The job sends this probe only when the last run had 0 ready workers. So it never wakes an endpoint at 0, and it does not keep a ready worker busy (that would stop the scale to 0).
@@ -568,7 +580,7 @@ Check the job: `gcloud logging read 'resource.type="cloud_run_job" AND resource.
 2. Put the Bot User OAuth Token (`xoxb-...`) in `SLACK_BOT_TOKEN` in `.env`. Put the channel in `SLACK_CHANNEL`, with quotes: `SLACK_CHANNEL="#models"`. Without quotes, direnv reads `#` as a comment and the value is empty.
 3. Invite the bot to the channel: `/invite @<bot name>`.
 4. In the Slack phone app, set the channel notifications to "All new messages".
-5. Run `./scripts/hcp-sync.py`. Apply `infra/core/`, then each deployment.
+5. Run `./scripts/hcp-sync.py`. It also makes the 2 Runpod secrets (see [Runpod (own images: Slack from the container)](#runpod-own-images-slack-from-the-container)). Apply `infra/core/`, then each deployment.
 6. Check the channel: in the console, open Monitoring > Alerting > Edit notification channels, and click "Send test notification" on `models-slack`. If no message comes, check that the bot is in the channel.
 
 The token is write-only (`auth_token_wo`): it is not in the Terraform state. To rotate it, change `SLACK_BOT_TOKEN`, raise `auth_token_wo_version` in `infra/core/notifications.tf`, run `hcp-sync.py` and apply core.

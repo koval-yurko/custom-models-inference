@@ -80,7 +80,14 @@ module "model" {
       # 24 GB GPUs, as the L4. Ampere (A5000, 3090) has no native FP8: vLLM runs the FP8 weights as W8A16, and the KV
       # cache stays in the model dtype.
       gpu_pools = ["AMPERE_24", "ADA_24"]
-      env       = { KV_CACHE_DTYPE = "auto" }
+      env = {
+        KV_CACHE_DTYPE = "auto"
+        # Slack messages from the container itself (image/app.py: "ready" after the load, "scaled to 0" at SIGTERM). Runpod
+        # writes no logs to GCP. The 2 values are Runpod secrets that scripts/hcp-sync.py makes from .env.
+        SLACK_BOT_TOKEN = "{{ RUNPOD_SECRET_slack_bot_token }}"
+        SLACK_CHANNEL   = "{{ RUNPOD_SECRET_slack_channel }}"
+        SLACK_TITLE     = "LLM-B Qwen3.5 9B on Runpod"
+      }
       # The weights (about 14 GB): 1 volume per data center (all with the S3 API for scripts/runpod-weights.py). A worker
       # starts only where a volume is, and 24 GB GPUs are often out of stock in 1 data center, so 3 give more chances.
       # 40 GB: the S3 upload of model.safetensors (13.5 GB) keeps its parts on the volume until the complete call joins

@@ -1,11 +1,11 @@
 # Build the LLM-B image and push it to the infra/core "models" repo. Run from the repo root:
 #   gcloud builds submit deployments/llm-b-qwen35-9b-fastapi/image \
 #     --config=deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml \
-#     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2
+#     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3
 # _TAG must match var.image_tag in ../variables.tf.
 substitutions:
   _REGION: us-central1
-  _TAG: 0.2.2
+  _TAG: 0.2.3
   _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/models/llm-b-qwen35-9b-fastapi:${_TAG}
 
 steps:

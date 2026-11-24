@@ -97,6 +97,31 @@ class MainTest(unittest.TestCase):
             self.assertEqual(c.get("/health").status_code, 200)
         self.assertIn("models ready", out.getvalue())
 
+    def test_slack_ready_and_scaled_to_0(self):
+        with mock.patch.dict("os.environ", {"SLACK_TITLE": "STT-A on Runpod"}), mock.patch.object(main, "slack") as s:
+            with ready_client(FakeModels()):
+                pass
+        self.assertEqual([c.args[0] for c in s.call_args_list], ["🟢 STT-A on Runpod is ready", "⚪ STT-A on Runpod scaled to 0"])
+
+    def test_slack_no_scaled_to_0_before_ready(self):
+        gate = threading.Event()
+        with mock.patch.object(main, "slack") as s:
+            with TestClient(main.create_app(lambda: gate.wait(5), "B")):
+                pass
+            gate.set()
+        s.assert_not_called()
+
+    def test_slack_post(self):
+        with mock.patch.dict("os.environ", {"SLACK_BOT_TOKEN": ""}), mock.patch("urllib.request.urlopen") as u:
+            main.slack("x")  # Vertex AI: no token, no call
+        u.assert_not_called()
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", {"SLACK_BOT_TOKEN": "t", "SLACK_CHANNEL": "#m"}), contextlib.redirect_stdout(out), \
+                mock.patch("urllib.request.urlopen", side_effect=OSError("down")) as u:
+            main.slack("x")  # a failure is printed, never raised
+        self.assertEqual(u.call_args.args[0].full_url, "https://slack.com/api/chat.postMessage")
+        self.assertIn("slack: down", out.getvalue())
+
     def test_transcribe_two_speakers(self):
         with ready_client(FakeModels()) as c:
             r = c.post("/v1beta/interactions", json=body())

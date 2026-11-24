@@ -45,7 +45,7 @@ run "alerts_watch_own_model" {
     error_message = "the down alert must watch the uvicorn shutdown line"
   }
   assert {
-    condition     = keys(module.platform_alerts) == ["runpod"] && strcontains(module.platform_alerts["runpod"].filters.ready, "scale-watch: runpod ")
-    error_message = "Runpod scale messages come from the scale-watch job"
+    condition     = module.model.runpod_env["SLACK_BOT_TOKEN"] == "{{ RUNPOD_SECRET_slack_bot_token }}" && module.model.runpod_env["SLACK_CHANNEL"] == "{{ RUNPOD_SECRET_slack_channel }}" && endswith(module.model.runpod_env["SLACK_TITLE"], " on Runpod")
+    error_message = "the Runpod container needs the Slack token and channel from Runpod secrets, and a title"
   }
 }

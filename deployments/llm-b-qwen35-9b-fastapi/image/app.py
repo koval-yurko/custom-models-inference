@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import traceback
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 
@@ -54,12 +55,34 @@ DEFAULT_SCHEMA = {
 engine: AsyncLLM | None = None
 
 
+def slack(text: str) -> None:
+    """Post 1 Slack message. Runpod only: the adapter sets SLACK_BOT_TOKEN (Runpod writes no logs to GCP, so the
+    log-based alerts cannot see it). A failure is only printed: it must never stop the model."""
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        return
+    body = json.dumps({"channel": os.environ.get("SLACK_CHANNEL", ""), "text": text}).encode()
+    req = urllib.request.Request("https://slack.com/api/chat.postMessage", data=body, headers={
+        "Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            answer = json.load(r)
+        if not answer.get("ok"):
+            print(f"slack: {answer.get('error')}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"slack: {e}", flush=True)
+
+
+TITLE = os.environ.get("SLACK_TITLE", "LLM-B")
+
+
 async def load_engine():
     """Load in a thread, so uvicorn opens the port at once (Vertex AI liveness is a TCP probe) and /health says 503."""
     global engine
     try:
         engine = await asyncio.to_thread(AsyncLLM.from_engine_args, ENGINE_ARGS)
         print("engine ready", flush=True)  # scale-alerts reads this line: uvicorn starts before the model loads
+        await asyncio.to_thread(slack, f"🟢 {TITLE} is ready")
     except BaseException:  # noqa: BLE001 - exit, so the error is in the log and the container restarts
         traceback.print_exc()
         os._exit(1)
@@ -72,6 +95,7 @@ async def lifespan(_: FastAPI):
     task.cancel()
     if engine:
         engine.shutdown()
+        slack(f"⚪ {TITLE} scaled to 0")  # uvicorn runs this at SIGTERM; a SIGKILL sends nothing
 
 
 app = FastAPI(title="llm-b-qwen35-9b-fastapi", lifespan=lifespan)

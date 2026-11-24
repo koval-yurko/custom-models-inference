@@ -108,6 +108,13 @@ module "model" {
     runpod = {
       # 24 GB GPUs, as the L4. All of them run bf16.
       gpu_pools = ["AMPERE_24", "ADA_24"]
+      env = {
+        # Slack messages from the container itself (speech_engine/main.py: "ready" after the load, "scaled to 0" at SIGTERM). Runpod
+        # writes no logs to GCP. The 2 values are Runpod secrets that scripts/hcp-sync.py makes from .env.
+        SLACK_BOT_TOKEN = "{{ RUNPOD_SECRET_slack_bot_token }}"
+        SLACK_CHANNEL   = "{{ RUNPOD_SECRET_slack_channel }}"
+        SLACK_TITLE     = "STT-A Qwen3 ASR + speakers on Runpod"
+      }
       # The weights: 1 volume per data center (all with the S3 API for scripts/runpod-weights.py). A worker starts only
       # where a volume is, and 24 GB GPUs are often out of stock in 1 data center, so 3 give more chances.
       # EU-RO-1 is excluded (the volume stays): on 2026-11-24 the load balancer never reached a worker there.

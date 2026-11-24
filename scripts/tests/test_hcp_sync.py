@@ -27,5 +27,34 @@ class ProviderKeys(unittest.TestCase):
         self.assertEqual(self.sync.WORKSPACES["custom-models-bootstrap"][1]["runpod_api_key"], "k")
 
 
+class RunpodSecrets(unittest.TestCase):
+    def setUp(self):
+        self.sync = load()
+        self.calls = []
+
+    def call(self, method, path="", body=None):
+        self.calls.append((method, path, body))
+        return {"secrets": [{"name": "slack_channel", "id": "s1"}, {"name": "other", "id": "s2"}]} if method == "GET" else {}
+
+    def run_sync(self, dry=False, secrets=None):
+        with mock.patch.object(self.sync, "DRY", dry), \
+                mock.patch.object(self.sync, "RUNPOD_SECRETS", secrets or {"slack_bot_token": "xoxb", "slack_channel": "#m"}), \
+                mock.patch.dict(os.environ, {"RUNPOD_API_KEY": "k"}):
+            self.sync.sync_runpod_secrets(self.call)
+
+    def test_creates_missing_and_updates_existing(self):
+        self.run_sync()
+        self.assertEqual(self.calls[1:], [("POST", "", {"name": "slack_bot_token", "value": "xoxb"}),
+                                          ("PATCH", "/s1", {"value": "#m"})])
+
+    def test_dry_run_only_reads(self):
+        self.run_sync(dry=True)
+        self.assertEqual([c[0] for c in self.calls], ["GET"])
+
+    def test_empty_value_is_skipped(self):
+        self.run_sync(secrets={"slack_bot_token": None, "slack_channel": "#m"})
+        self.assertEqual(self.calls[1:], [("PATCH", "/s1", {"value": "#m"})])
+
+
 if __name__ == "__main__":
     unittest.main()
