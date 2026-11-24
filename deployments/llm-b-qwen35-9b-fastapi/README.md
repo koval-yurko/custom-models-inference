@@ -37,7 +37,7 @@ Do `infra/core` first (see `infra/README.md`). Its `gateways.tf` has the gateway
    ```sh
    gcloud builds submit deployments/llm-b-qwen35-9b-fastapi/image \
      --config=deployments/llm-b-qwen35-9b-fastapi/image/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
    ```
 3. Apply. It makes the Vertex AI endpoint, the Runpod volumes, template and endpoint, the CORS proxy and the gateway.
    ```sh
@@ -128,6 +128,7 @@ Write the results here after each measured cold start. "Cold start" is the time 
 | 2026-11-14 | 0.1.0 | First deploy (`vertex.py deploy`: model upload, node start, image pull, weights load, engine init) | 1398 s (23 min) | 1 replica up after the deploy. |
 | 2026-11-14 | 0.1.0 | Scale up from 0 (first call 22:34:32 UTC, through the gateway, retry every 30 s) | failed: `429` for 1825 s, replicas stayed at 0 | Cause: no GPU stock. The deployed model status said `Machine type temporarily unavailable ... "g2-standard-8" ... "nvidia-l4"`. The project quota was fine. This is not a start-up time; measure again when a node is available. |
 | 2026-11-16 | 0.1.0 | Scale up from 0 (first call 15:07:06 UTC, through the gateway, retry every 30 s) | **648 s (10.8 min)** to the first `200`; the scale-up began about 30 s before the first call | The deployed model status showed failed attempts first: `System error`, then `Machine type temporarily unavailable`, then `Model server never became ready`. Vertex AI retried by itself, and the next attempt answered. Plan for 10 to 30 min, or a failure when no L4 is free. |
+| 2026-11-24 | 0.2.1, 0.2.2 | Runpod scale up from 0 (`/runpod/extract`, first call 13:26:45 UTC, retry every 30 s; again at 14:18:45 with 0.2.2) | failed: `429` for 25 min, then stopped by hand | RTX 4090, EU-RO-1, network volume. Container start to `engine ready`: 141 s (13:31:00 to 13:33:21). The load balancer never routed a call: `https://<id>.api.runpod.ai/health` timed out, and Runpod stopped the container every 9 to 10 min. 0.2.2 logs each health code change: no health request reached the container. The cause is on the Runpod side (see the STT-A README). |
 
 ## Check scale to zero
 

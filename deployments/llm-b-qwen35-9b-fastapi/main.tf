@@ -86,6 +86,8 @@ module "model" {
       # 40 GB: the S3 upload of model.safetensors (13.5 GB) keeps its parts on the volume until the complete call joins
       # them, so the copy needs about 2 times the largest file. A full volume answers 403.
       volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 40 }
+      # Parked on 2026-11-24: the load balancer never reached the worker (see the STT-A README). Remove to serve again.
+      workers_max = 0
     }
   }
 }

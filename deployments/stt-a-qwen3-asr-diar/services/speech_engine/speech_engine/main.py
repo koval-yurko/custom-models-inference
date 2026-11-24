@@ -2,7 +2,7 @@
 contract, in a Vertex AI custom container or a Runpod worker (the same image). The transcription work is in pipeline.py.
 
 Routes (Vertex AI: through :rawPredict, predict_route; Runpod: the load balancing endpoint):
-  GET  /health                503 while the 3 models load, then 200
+  GET  /health                while the 3 models load: 503 (Vertex AI) or 204 (Runpod), then 200
   POST /v1beta/interactions   Gemini Interactions body -> output_text + word_info annotations
 
 Run with 1 process only: each process loads all 3 models. Spec: docs/specs/2026-11-21-stt-a-design.md.
@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Callable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from speech_engine.logic import BadRequest, error_body, parse_request
 from speech_engine.pipeline import Models, transcribe
@@ -58,8 +58,16 @@ def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
     app = FastAPI(title="stt-a-qwen3-asr-diar", lifespan=lifespan)
 
     @app.get("/health")
-    async def health():
-        if state["models"] is None:
+    async def health(request: Request):
+        # Runpod load balancing reads 204 as "initializing" and any other code as unhealthy: it stopped the worker
+        # after about 10 min of 503 (worker log 2026-11-24 "container is unhealthy: dead"), before the load ended.
+        code = 200 if state["models"] is not None else 204 if SETUP["platform"] == "runpod" else 503
+        if code != state.get("health"):  # 1 line per change: shows that the platform probe arrives, and from where
+            state["health"] = code
+            print(f"health {code} to {request.client.host if request.client else '-'}", flush=True)
+        if code == 204:
+            return Response(status_code=204)
+        if code == 503:
             return JSONResponse({"status": "loading"}, status_code=503)
         return {"status": "ok"}
 
@@ -91,5 +99,6 @@ if __name__ == "__main__":
 
     from speech_engine.models import RealModels
 
-    uvicorn.run(create_app(RealModels, os.environ["AUDIO_BUCKET"]), host="0.0.0.0",
+    # Runpod: "::" takes IPv6 and IPv4 on Linux, in case the load balancer probe comes over IPv6.
+    uvicorn.run(create_app(RealModels, os.environ["AUDIO_BUCKET"]), host="::" if SETUP["platform"] == "runpod" else "0.0.0.0",
                 port=port(os.environ), workers=1)

@@ -12,12 +12,14 @@ locals {
   # 1 volume per data center. A worker starts only in a data center with a volume, so more data centers give more
   # GPUs to choose from. Runpod mounts the volume of the worker's data center (1 volume per data center).
   volume_dcs = local.volume != null ? toset(local.volume.data_centers) : toset([])
-  port       = try(var.spec.port, 8080)
-  name       = try(var.options.name, var.name)
-  secret     = try(var.options.hf_token_secret, null)
-  stock      = try(var.spec.image.stock, null)
-  own        = try(var.spec.image.own, null)
-  image      = local.own != null ? "${var.region}-docker.pkg.dev/${var.project_id}/models/${local.own}" : local.stock
+  # The data centers the endpoint uses. An excluded one keeps its volume (and its weights) for later.
+  serve_dcs = setsubtract(local.volume_dcs, toset(try(local.volume.excluded_data_centers, [])))
+  port      = try(var.spec.port, 8080)
+  name      = try(var.options.name, var.name)
+  secret    = try(var.options.hf_token_secret, null)
+  stock     = try(var.spec.image.stock, null)
+  own       = try(var.spec.image.own, null)
+  image     = local.own != null ? "${var.region}-docker.pkg.dev/${var.project_id}/models/${local.own}" : local.stock
 
   # The weights path that {model} and env MODEL get.
   model_path = local.volume != null ? "/runpod-volume/${coalesce(local.gcs_dir, "-")}" : try(local.weights.hf_repo, null)
@@ -83,6 +85,10 @@ resource "runpod_template" "this" {
       error_message = "options.volume.data_centers must list at least 1 data center (with the S3 API, for scripts/runpod-weights.py)."
     }
     precondition {
+      condition     = local.volume == null || length(local.serve_dcs) > 0
+      error_message = "options.volume.excluded_data_centers leaves no data center for the endpoint."
+    }
+    precondition {
       condition     = local.volume == null || local.gcs_dir != null
       error_message = "options.volume needs spec.weights.gcs_dir: the weights folder on the volume (the same as in the GCS weights bucket)."
     }
@@ -117,12 +123,13 @@ resource "runpod_serverless_endpoint" "this" {
   gpu_count      = 1
   # The volumes tie the workers to their data centers.
   # Sorted by ID: Runpod returns them in that order, and another order gives "inconsistent result after apply".
-  network_volumes = local.volume != null ? sort([for v in values(runpod_network_volume.this) : v.id]) : null
-  data_center_ids = local.volume != null ? sort(tolist(local.volume_dcs)) : null
+  network_volumes = local.volume != null ? sort([for dc, v in runpod_network_volume.this : v.id if contains(local.serve_dcs, dc)]) : null
+  data_center_ids = local.volume != null ? sort(tolist(local.serve_dcs)) : null
   workers_min     = 0 # scale to zero
-  workers_max     = try(var.spec.max_replicas, 1)
-  idle_timeout    = try(var.spec.idle_seconds, 300)
-  flashboot       = "FLASHBOOT"
+  # options.workers_max = 0 parks the endpoint: no worker starts, the endpoint and the volumes stay.
+  workers_max  = try(var.options.workers_max, try(var.spec.max_replicas, 1))
+  idle_timeout = try(var.spec.idle_seconds, 300)
+  flashboot    = "FLASHBOOT"
 
   lifecycle {
     # Runpod copies the template into the endpoint only at create (template_id). A template change (image,

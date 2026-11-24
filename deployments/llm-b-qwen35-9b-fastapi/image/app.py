@@ -2,7 +2,7 @@
 (container contract of docs/specs/2026-11-22-multi-platform-design.md: PORT and MODEL, with the AIP_ values as fallback).
 
 Routes (through :invoke, <base>/invoke/<route>):
-  GET  /health    200 when the engine is ready, 503 while it loads or after it failed
+  GET  /health    200 when the engine is ready; while it loads 503 (Vertex AI) or 204 (Runpod); 503 after it failed
   POST /generate  {"prompt", "max_tokens"?, "temperature"?} -> {"text"}
   POST /extract   {"text", "schema"?, "max_tokens"?} -> {"data"}: JSON that matches the schema (structured outputs)
 
@@ -16,8 +16,8 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from vllm import AsyncEngineArgs, SamplingParams
 from vllm.sampling_params import StructuredOutputsParams
@@ -109,14 +109,33 @@ async def complete(messages: list[dict], params: SamplingParams) -> str:
     return final.outputs[0].text
 
 
+last_health = None
+
+
+def log_health(request: Request, code: int):
+    """1 line per change of the code: shows that the platform probe arrives, and from where."""
+    global last_health
+    if code != last_health:
+        last_health = code
+        print(f"health {code} to {request.client.host if request.client else '-'}", flush=True)
+
+
 @app.get("/health")
-async def health():
+async def health(request: Request):
     if engine is None:
+        # Runpod load balancing reads 204 as "initializing" and any other code as unhealthy: it stopped the worker
+        # after about 10 min of 503 (worker log 2026-11-24 "container is unhealthy: dead"), before the load ended.
+        if os.environ.get("SETUP_PLATFORM") == "runpod":
+            log_health(request, 204)
+            return Response(status_code=204)
+        log_health(request, 503)
         return JSONResponse({"status": "loading"}, status_code=503)
     try:
         await engine.check_health()
     except Exception as e:  # noqa: BLE001 - engine core is dead: 503 makes Vertex AI replace the replica
+        log_health(request, 503)
         return JSONResponse({"status": "error", "detail": repr(e)}, status_code=503)
+    log_health(request, 200)
     return {"status": "ok"}
 
 
@@ -146,4 +165,6 @@ async def extract(body: ExtractIn):
 if __name__ == "__main__":
     # PORT (container contract, the Runpod adapter sets it), else AIP_HTTP_PORT (Vertex AI), else 8080.
     port = int(os.environ.get("PORT") or os.environ.get("AIP_HTTP_PORT") or "8080")
-    uvicorn.run(app, host="0.0.0.0", port=port, workers=1)
+    # Runpod: "::" takes IPv6 and IPv4 on Linux, in case the load balancer probe comes over IPv6.
+    host = "::" if os.environ.get("SETUP_PLATFORM") == "runpod" else "0.0.0.0"
+    uvicorn.run(app, host=host, port=port, workers=1)

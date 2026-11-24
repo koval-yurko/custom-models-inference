@@ -220,6 +220,43 @@ run "own_image_with_volume" {
   }
 }
 
+run "excluded_data_center_keeps_volume_and_workers_max" {
+  command = apply
+
+  override_module {
+    target  = module.registry[0]
+    outputs = { id = "reg1" }
+  }
+
+  variables {
+    name = "stt-a-qwen3-asr-diar"
+    spec = {
+      image        = { own = "stt-a-qwen3-asr-diar:0.2.0" }
+      args         = []
+      port         = 8080
+      health_route = "/health"
+      routes       = ["/v1beta/interactions"]
+      gpu          = "L4"
+      max_replicas = 1
+      weights      = { hf_repo = "Qwen/Qwen3-ASR-1.7B", gcs_dir = "stt-a-qwen3-asr-diar" }
+    }
+    options = { workers_max = 0, volume = { data_centers = ["EU-RO-1", "EUR-IS-1"], excluded_data_centers = ["EU-RO-1"] } }
+  }
+
+  assert {
+    condition     = keys(runpod_network_volume.this) == ["EU-RO-1", "EUR-IS-1"]
+    error_message = "an excluded data center keeps its volume"
+  }
+  assert {
+    condition     = length(runpod_serverless_endpoint.this.network_volumes) == 1 && runpod_serverless_endpoint.this.data_center_ids == tolist(["EUR-IS-1"])
+    error_message = "the endpoint does not use the excluded data center"
+  }
+  assert {
+    condition     = runpod_serverless_endpoint.this.workers_max == 0
+    error_message = "options.workers_max overrides spec.max_replicas"
+  }
+}
+
 run "volume_needs_gcs_dir" {
   command = plan
 

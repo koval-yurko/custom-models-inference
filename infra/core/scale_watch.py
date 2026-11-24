@@ -1,4 +1,4 @@
-"""scale-watch: 1 log line when a Runpod endpoint goes from 0 to 1 or more up workers, or back to 0.
+"""scale-watch: 1 log line when a Runpod endpoint goes from 0 to 1 or more ready workers, or back to 0.
 
 Cloud Scheduler runs this Cloud Run job every minute (infra/core/scale_watch.tf). It reads every endpoint and model of
 the accounts, compares the ready counts with the last run (STATE_BUCKET/state.json) and prints
@@ -23,20 +23,36 @@ def http_get(url, auth):
         return json.load(r)
 
 
-def runpod_counts(key, get=http_get):
-    """{"runpod/<endpoint id>": (name, up workers)} for every endpoint of the account. Up: IDLE or RUNNING with an
+def health_ok(url, auth):
+    """True when the model answers GET /health with 200. A worker that still loads answers 204 or holds the request."""
+    req = urllib.request.Request(url, headers={"Authorization": auth})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status == 200
+    except Exception:  # noqa: BLE001 - not ready yet (timeout, 5xx): the next run asks again
+        return False
+
+
+def runpod_counts(key, prev=None, get=http_get, probe=health_ok):
+    """{"runpod/<endpoint id>": (name, ready workers)} for every endpoint of the account. Up: IDLE or RUNNING with an
     uptime. A FlashBoot worker that has stopped stays in the list as IDLE without uptimeSeconds (measured 2026-11-23),
-    so the summary counts are not used."""
+    so the summary counts are not used. A worker is up minutes before the model loads, so an endpoint that had 0 ready
+    workers in the last run counts as ready only when its /health answers 200. The probe goes only to an endpoint with
+    an up worker (it never wakes one at 0) and stops once it is ready (it does not keep the worker busy)."""
     auth = f"Bearer {key}"
     out = {}
     for e in get(RUNPOD, auth).get("endpoints", []):
+        k = f"runpod/{e['id']}"
         workers = get(f"{RUNPOD}/{e['id']}/workers", auth).get("workers", [])
         up = sum(1 for w in workers if w.get("status") in ("IDLE", "RUNNING") and w.get("uptimeSeconds") is not None)
-        out[f"runpod/{e['id']}"] = (e.get("name", ""), up)
+        if up and not (prev or {}).get(k):
+            health = (e.get("requestUrls") or {}).get("health") or f"https://{e['id']}.api.runpod.ai/health"
+            up = up if probe(health, auth) else 0
+        out[k] = (e.get("name", ""), up)
     return out
 
 
-# (platform, env var of the key, reader). Another platform needs one more entry.
+# (platform, env var of the key, reader(key, prev counts)). Another platform needs one more entry.
 PLATFORMS = (("runpod", "RUNPOD_API_KEY", runpod_counts),)
 
 
@@ -119,7 +135,7 @@ def main():
         if not key:
             continue
         try:
-            cur.update(fn(key))
+            cur.update(fn(key, prev))
         except Exception as e:  # one platform down must not stop the other; the key is never printed
             failed.add(platform)
             print(f"scale-watch warning: {platform} read failed: {type(e).__name__} {getattr(e, 'code', '')}", file=sys.stderr)

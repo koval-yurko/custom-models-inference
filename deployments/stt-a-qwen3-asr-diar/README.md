@@ -80,7 +80,7 @@ Before the first Runpod apply: make a Runpod S3 API key (Runpod console, Setting
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
@@ -111,14 +111,14 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.2 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
    gcloud artifacts docker images list $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models --include-tags \
      --filter="package~stt-a-qwen3-asr-diar" --format="table(package,tags)"
    ```
-   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.0` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
+   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.2` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
 2. Undeploy the GPU model. The model upload holds the image tag, so a new image needs a new upload.
    ```sh
    ./scripts/deploy.py undeploy deployments/stt-a-qwen3-asr-diar
@@ -224,7 +224,7 @@ curl -s "$GW/v1beta/files/$ID/versions/$V/score" -H "x-api-key: $KEY" | python3 
 curl -s "$GW/v1beta/scores" -H "x-api-key: $KEY" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['setups'], indent=1))"
 ```
 
-Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.0` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
+Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.2` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
 
 Delete a stored file by hand (there is no delete route): `gcloud storage rm -r gs://$GCP_PROJECT_ID-stt-audio/files/<id>/`.
 
@@ -248,8 +248,9 @@ Checks only a real deploy can do (write the results here):
 | 2026-11-21 | 0.1.3 | Deploy, attempt 1 (`vertex.py deploy`) | Failed after 28.5 min (22:41:31 to 23:10:05 UTC) | Node and image pull 24 min (first container log 23:05:27). The container was healthy: weights copy 67 s, `models ready` at 23:08:57, `/health` 200. Then the operation failed with code 13 "System error. Please try this operation again" and Vertex AI stopped the container. Slack got "scaled to 0" from that stop. No cause in the logs. |
 | 2026-11-21 | 0.1.3 | Deploy, attempt 2 (same command, the uploaded model is reused) | 12 min (23:10:38 to 23:22:43 UTC) | First container log after 6.4 min (the node probably had the image). Weights copy 63 s, `models ready` 3 min 42 s after the container start. |
 | 2026-11-22 | 0.1.3 | Scale up from 0 (first `transcribe` call to HTTP 201) | 7 min 19 s (13:33:18 to 13:40:37 UTC) | Container start after 3 min 14 s, weights copy 69 s, `models ready` at 13:40:12 (6 min 54 s). A try on 2026-11-21 reached `models ready` in 7 min 3 s, but the next call got no answer (the connection closed after 75 s, no log in the STT API service). A new gateway config went live a few minutes before. |
+| 2026-11-24 | 0.2.1, 0.2.2 | Runpod scale up from 0 (`/runpod/v1beta/files/<id>/transcribe`, first call 13:26:45 UTC, retry every 30 s; again at 14:18:44 with 0.2.2) | failed: `429` for 25 min, then stopped by hand | RTX 4090, EU-RO-1, network volume `ygncm7cg2c`. GPU wait (THROTTLED, INITIALIZING) 4 min with 0.2.1 and 10 min with 0.2.2. Container start to `models ready`: 78 s with 0.2.1 (13:30:34 to 13:31:52), 65 s with 0.2.2 (14:29:24 to 14:30:29). The load balancer never routed a call, and Runpod stopped the container every 9 to 10 min. 0.2.2 listens on `[::]:8080` and logs each health code change: no health request reached the container. LLM-A (stock vLLM, A5000, CA-MTL-1, no volume) answered `200` after 266 s on the same day. |
 
-Runpod: measure the first cold start (first `/runpod/` call to `200`) and add a row. The proxy answers `429` every 280 s while the worker starts, so count from the first try.
+Runpod: the first cold start that reaches `200` is not measured yet (see the 2026-11-24 row). The proxy answers `429` every 280 s while the worker starts, so count from the first try.
 
 Weights copy (from the container start to the first vLLM log line): 89 s with 0.1.2 (1 file at a time), 63 to 67 s with 0.1.3 (`transfer_manager`, 16 threads). The gain is about 25 s. The node start and the image pull take most of the cold start, and the weights copy does not change them. The 0.1.3 log shows `Connection pool is full ... Connection pool size: 10`: 16 threads share 10 connections.
 

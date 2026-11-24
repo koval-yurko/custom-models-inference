@@ -78,6 +78,10 @@ module "model" {
       predict_route = "/v1/chat/completions" # :rawPredict. Without it the adapter uses :invoke for every route.
     }
     # L4, A5000 or 3090: Ampere has no native FP8, so no --kv-cache-dtype=fp8 here. vLLM downloads the weights at start.
-    runpod = { gpu_pools = ["AMPERE_24"] }
+    runpod = {
+      gpu_pools = ["AMPERE_24"]
+      # Parked on 2026-11-24 (focus on STT-A): no worker starts. Remove the line to serve again.
+      workers_max = 0
+    }
   }
 }

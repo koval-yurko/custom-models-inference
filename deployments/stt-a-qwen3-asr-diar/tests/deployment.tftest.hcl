@@ -33,7 +33,7 @@ run "custom_container_on_vertex" {
   command = apply
 
   assert {
-    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.2.0"
+    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.2.2"
     error_message = "the image must come from the models repo with the image_tag"
   }
   assert {
@@ -87,7 +87,7 @@ run "setup_record" {
       { name = "SETUP_ASR", value = "Qwen3-ASR-1.7B" },
       { name = "SETUP_ALIGNER", value = "Qwen3-ForcedAligner-0.6B" },
       { name = "SETUP_DIARIZATION", value = "pyannote/speaker-diarization-community-1" },
-      { name = "SETUP_IMAGE_TAG", value = "0.2.0" },
+      { name = "SETUP_IMAGE_TAG", value = "0.2.2" },
       { name = "SETUP_PLATFORM", value = "vertex" },
     ] : contains(output.vertex.model_upload.model.containerSpec.env, e)])
     error_message = "the GPU service needs the SETUP_* env: each answer records the setup that made it"

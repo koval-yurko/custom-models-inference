@@ -1,5 +1,7 @@
 # Slack channel for the scale notifications. Deployments find it by display name (infra/modules/scale-alerts).
 # Write-only: the token value is not in Terraform state. To rotate it, change SLACK_BOT_TOKEN in .env and raise auth_token_wo_version.
+# Raise auth_token_wo_version also for a new channel_name: Google rejects a label update without the token (HTTP 400
+# "missing field notification_channel.labels[auth_token]"), and Terraform sends the token only when the version changes.
 resource "google_monitoring_notification_channel" "slack" {
   project      = var.project_id
   type         = "slack"
@@ -10,7 +12,7 @@ resource "google_monitoring_notification_channel" "slack" {
 
   sensitive_labels {
     auth_token_wo         = var.slack_bot_token
-    auth_token_wo_version = 1
+    auth_token_wo_version = 3 # 3: channel #important-emails -> #custom-models (2026-11-24; 2 failed: no token in HCP)
   }
 
   # Google adds the label "team" (the Slack workspace name). An update that removes it fails with HTTP 400, because

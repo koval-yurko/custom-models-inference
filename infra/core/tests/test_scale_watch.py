@@ -31,8 +31,38 @@ class RunpodCounts(unittest.TestCase):
             ]},
             "https://api.runpod.io/v2/serverless/ep2/workers": {"workers": [{"id": "w4", "status": "IDLE", "startedAt": "2026-11-23T07:58:08Z"}]},
         })
-        self.assertEqual(sw.runpod_counts("k", get), {"runpod/ep1": ("llm-a", 2), "runpod/ep2": ("b", 0)})
+        self.assertEqual(sw.runpod_counts("k", {"runpod/ep1": 1}, get), {"runpod/ep1": ("llm-a", 2), "runpod/ep2": ("b", 0)})
         self.assertEqual(get.calls[0][1], "Bearer k")
+
+    ONE_UP = {
+        "https://api.runpod.io/v2/serverless": {"endpoints": [
+            {"id": "ep1", "name": "llm-b", "requestUrls": {"health": "https://ep1.api.runpod.ai/health"}}]},
+        "https://api.runpod.io/v2/serverless/ep1/workers": {"workers": [{"id": "w1", "status": "RUNNING", "uptimeSeconds": 60}]},
+    }
+
+    def probe(self, answer):
+        calls = []
+
+        def p(url, auth):
+            calls.append((url, auth))
+            return answer
+        p.calls = calls
+        return p
+
+    def test_a_started_worker_is_not_ready_until_health_answers_200(self):
+        # Measured 2026-11-24: LLM-B got "is ready" at 09:33 from the worker uptime, and its model never answered.
+        loading = self.probe(False)
+        self.assertEqual(sw.runpod_counts("k", {"runpod/ep1": 0}, fake_get(self.ONE_UP), loading), {"runpod/ep1": ("llm-b", 0)})
+        self.assertEqual(loading.calls, [("https://ep1.api.runpod.ai/health", "Bearer k")])
+        self.assertEqual(sw.runpod_counts("k", {"runpod/ep1": 0}, fake_get(self.ONE_UP), self.probe(True)), {"runpod/ep1": ("llm-b", 1)})
+
+    def test_no_probe_once_ready_or_when_no_worker_is_up(self):
+        # A probe at 0 workers would start a GPU; a probe every minute after ready would stop the scale to 0.
+        p = self.probe(False)
+        self.assertEqual(sw.runpod_counts("k", {"runpod/ep1": 1}, fake_get(self.ONE_UP), p), {"runpod/ep1": ("llm-b", 1)})
+        down = {**self.ONE_UP, "https://api.runpod.io/v2/serverless/ep1/workers": {"workers": [{"id": "w1", "status": "IDLE"}]}}
+        self.assertEqual(sw.runpod_counts("k", None, fake_get(down), p), {"runpod/ep1": ("llm-b", 0)})
+        self.assertEqual(p.calls, [])
 
 
 class Events(unittest.TestCase):

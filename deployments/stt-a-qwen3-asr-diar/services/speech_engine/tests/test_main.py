@@ -79,6 +79,18 @@ class MainTest(unittest.TestCase):
             self.assertEqual(r.json()["error"]["status"], "UNAVAILABLE")
             gate.set()
 
+    def test_not_ready_on_runpod_is_204(self):
+        # Runpod load balancing stops a worker that answers anything but 200 or 204 for about 10 min.
+        gate = threading.Event()
+
+        def load():
+            gate.wait(5)
+            return FakeModels()
+
+        with mock.patch.dict(main.SETUP, {"platform": "runpod"}), TestClient(main.create_app(load, "B")) as c:
+            self.assertEqual(c.get("/health").status_code, 204)
+            gate.set()
+
     def test_ready_prints_line(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), ready_client(FakeModels()) as c:
