@@ -19,7 +19,7 @@ variable "spec" {
 }
 
 variable "options" {
-  description = "Runpod options: name, gpu_pools, excluded_types, scaling_value, disk_gb, extra_args, env, hf_token_secret, volume ({ data_centers, size_gb, type, excluded_data_centers }), registry, workers_max. See infra/README.md, \"Module: platform-runpod\"."
+  description = "Runpod options: name, gpu_pools, excluded_types, scaling_value, disk_gb, extra_args, env, hf_token_secret, volume ({ data_centers, size_gb, type, excluded_data_centers }), registry, workers_max, flashboot (FLASHBOOT, OFF or PRIORITY_FLASHBOOT). See infra/README.md, \"Module: platform-runpod\"."
   type        = any
   default     = {}
 }

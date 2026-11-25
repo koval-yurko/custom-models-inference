@@ -26,7 +26,8 @@ override_data {
 }
 
 variables {
-  project_id = "p"
+  project_id      = "p"
+  modal_workspace = "ws"
 }
 
 run "alerts_watch_own_model" {

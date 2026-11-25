@@ -26,3 +26,11 @@ resource "runpod_registry" "gcp_models" {
   username = "_json_key"
   password = base64decode(google_service_account_key.runpod_pull.private_key)
 }
+
+# The same read-only key for Modal: scripts/platforms/modal.py reads it at deploy time and gives it to Modal as the
+# registry secret (SERVICE_ACCOUNT_JSON). Sensitive: `terraform output -raw registry_pull_key` prints it.
+output "registry_pull_key" {
+  description = "JSON key of the read-only pull service account (repo models). For the Modal image pull."
+  value       = base64decode(google_service_account_key.runpod_pull.private_key)
+  sensitive   = true
+}

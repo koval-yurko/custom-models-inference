@@ -36,7 +36,8 @@ Contents:
 - One API key for all gateways (`models-gateways`). The key works only for those gateway APIs.
 - The Slack notification channel `models-slack` (`notifications.tf`). The deployments send their scale messages to it. See [Scale notifications (Slack)](#scale-notifications-slack).
 - The secrets `runpod-s3-access-key` and `runpod-s3-secret-key` (`runpod_s3.tf`, write-only from `RUNPOD_S3_*` in `.env`). Only the Cloud Build service account may read them: `scripts/runpod-weights.py --cloud` uses them.
-- The Runpod registry credential `gcp-models` (`runpod_registry.tf`): a service account `runpod-pull` with `roles/artifactregistry.reader` on the repo `models` only, its JSON key, and a `runpod_registry` with the username `_json_key`. Runpod pulls own images (STT-A) with it. The key is in the state of `infra/core` (sensitive, read-only). To rotate it, run `terraform apply -replace=google_service_account_key.runpod_pull`.
+- The Runpod registry credential `gcp-models` (`runpod_registry.tf`): a service account `runpod-pull` with `roles/artifactregistry.reader` on the repo `models` only, its JSON key, and a `runpod_registry` with the username `_json_key`. Runpod pulls own images (STT-A) with it. The key is in the state of `infra/core` (sensitive, read-only). The sensitive output `registry_pull_key` gives the same key to `scripts/platforms/modal.py` for the Modal image pull. To rotate it, run `terraform apply -replace=google_service_account_key.runpod_pull`.
+- The secrets `runpod-api-key` and `modal-api-key` (`provider_keys.tf`, write-only from `RUNPOD_API_KEY`, and from `MODAL_PROXY_TOKEN_ID` and `MODAL_PROXY_TOKEN_SECRET` in `.env`). The CORS proxies read them.
 - The bucket `<project_id>-ui` for the static test UI (`ui.tf`). Anyone can read a file in it (`roles/storage.legacyObjectReader`: no list, no write). See [Test UI](#test-ui).
 
 All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to change it.
@@ -48,7 +49,8 @@ All resources go in `us-central1` by default. Set `GCP_REGION` in `.env` to chan
 | `gateways.tf` | Gateway APIs and the shared API key |
 | `ui.tf` | Public bucket of the test UI |
 | `notifications.tf` | Slack notification channel `models-slack` |
-| `runpod_registry.tf` | Runpod pull credential for the repo `models` |
+| `runpod_registry.tf` | Runpod pull credential for the repo `models`, and the output `registry_pull_key` (Modal) |
+| `provider_keys.tf` | Secrets `runpod-api-key` and `modal-api-key` for the CORS proxies |
 | `runpod_s3.tf` | Runpod S3 API key secrets for the cloud weights copy |
 
 ## First setup
@@ -393,8 +395,8 @@ The endpoint is private. The adapter grants no access. A caller needs `aiplatfor
 
 One call creates:
 
-- 1 adapter per platform in `platforms`: `vertex` ([Module: platform-vertex](#module-platform-vertex)) and `runpod` ([Module: platform-runpod](#module-platform-runpod)). Baseten is deferred, because the Baseten account cannot deploy custom models; see the spec (Status). The module rejects other ids, an empty list and a duplicated id at plan.
-- 1 CORS proxy `<gateway_id>-proxy` with 1 target per platform. The first platform is the default for the old paths. For each platform with a key (`auth` is not `google`), the module gives the proxy the env var `<AUTH>_API_KEY` from the `infra/core` secret `<auth>-api-key` (for Runpod: `RUNPOD_API_KEY` from `runpod-api-key`). The proxy timeout is the largest deadline of the targets.
+- 1 adapter per platform in `platforms`: `vertex` ([Module: platform-vertex](#module-platform-vertex)), `runpod` ([Module: platform-runpod](#module-platform-runpod)) and `modal` ([Module: platform-modal](#module-platform-modal)). Baseten is deferred, because the Baseten account cannot deploy custom models; see the spec (Status). The module rejects other ids, an empty list and a duplicated id at plan.
+- 1 CORS proxy `<gateway_id>-proxy` with 1 target per platform. The first platform is the default for the old paths. For each platform with a key (`auth` is not `google`), the module gives the proxy the env var `<AUTH>_API_KEY` from the `infra/core` secret `<auth>-api-key` (for Runpod: `RUNPOD_API_KEY` from `runpod-api-key`; for Modal: `MODAL_API_KEY` from `modal-api-key`). The proxy timeout is the largest deadline of the targets.
 - 1 API Gateway ([Module: gateway](#module-gateway)) with the old paths plus 1 path per platform: `/<platform><route>`. `extra_paths` go to their own backend (STT-A: the `stt_api` service) with the same prefix rule.
 
 Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every platform), `gateway_id` (the API in `infra/core/gateways.tf`), `platforms`, `spec`, `platform_options`, `extra_paths` (default `{}`), `proxy_invokers` (more service accounts that may call the proxy, default `[]`; STT-A: the `stt_api` SA).
@@ -414,7 +416,7 @@ Inputs: `project_id`, `region`, `gateway_region`, `name` (base name on every pla
 
 `platform_options.<id>` holds the options of 1 platform. A flag that depends on the platform or the GPU goes into `platform_options.<id>.extra_args`. The adapter appends it to `spec.args`. `platform_options.<id>.name` overrides `name` for 1 platform.
 
-Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `vertex_endpoint_id`, `vertex_endpoint_dns`, `vertex_service_account_email`, `proxy_url`, `gateway_service_account_email`, `runpod_volumes` (for `scripts/runpod-weights.py`), `runpod_args`, `runpod_env` and `proxy_extra_invoker_count` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm/main.tf` and `outputs.tf`.
+Outputs: `platforms`, `targets` (platform id to target), `ui_platforms` (1 entry `{ id, label, base_url = "<gateway_url>/<id>", cold_start }` per platform, for the `ui` output), `gateway_url`, `gateway_id`, `gateway_region`, `api_config`, `gateway_address` (relative to the module), `openapi`, `vertex`, `modal` (for `scripts/platforms/modal.py`), `vertex_endpoint_id`, `vertex_endpoint_dns`, `vertex_service_account_email`, `proxy_url`, `gateway_service_account_email`, `runpod_volumes` (for `scripts/runpod-weights.py`), `runpod_args`, `runpod_env` and `proxy_extra_invoker_count` (for tests), `scale_watch_ids` (for `alerts.tf`). The root passes them through. Example: `deployments/llm-a-gemma4-12b-vllm/main.tf` and `outputs.tf`.
 
 After apply, run the post-apply step of each platform:
 
@@ -425,7 +427,7 @@ After apply, run the post-apply step of each platform:
 ./scripts/deploy.py status   deployments/<name>                    # deployed or not, per platform
 ```
 
-`deploy.py` reads the outputs `platforms` and `targets`. A target with `post_apply = "vertex"` runs `scripts/platforms/vertex.py` (model upload and deploy, see [Deploy method](#deploy-method-terraform-plus-1-script-step)). At the end it runs `ui-deploy.py --config-only`. It does not run `terraform apply`.
+`deploy.py` reads the outputs `platforms` and `targets`. A target with `post_apply = "vertex"` runs `scripts/platforms/vertex.py` (model upload and deploy, see [Deploy method](#deploy-method-terraform-plus-1-script-step)). A target with `post_apply = "modal"` runs `scripts/platforms/modal.py` (see [Module: platform-modal](#module-platform-modal)). At the end it runs `ui-deploy.py --config-only`. It does not run `terraform apply`.
 
 ### Module: platform-vertex
 
@@ -452,6 +454,7 @@ Output `target`: `{ id = "vertex", label = "Vertex AI", url, append_path, auth =
 - Scale: `workers_min = 0`, `workers_max = spec.max_replicas`, `idle_timeout = spec.idle_seconds`, `scaling_type = "REQUEST_COUNT"`, `flashboot = "FLASHBOOT"`, 1 GPU per worker. `spec.gpu = null` (CPU) fails at plan.
 - Options: `name`, `gpu_pools` (default `["AMPERE_24"]`: L4, A5000 or 3090), `excluded_types` (default none), `scaling_value` (default 4 requests at the same time), `disk_gb` (default 60), `extra_args`, `env`, `hf_token_secret`, `volume`, `registry`, `workers_max`. Any cloud type. Any data center without a volume. The flags must work on every GPU type in the pools: `AMPERE_24` has no native FP8.
 - `workers_max = 0` parks an endpoint: no worker starts, and the endpoint and its volumes stay. Without it, `spec.max_replicas` applies.
+- `flashboot` (default `FLASHBOOT`; also `OFF`, `PRIORITY_FLASHBOOT`). The account allows 3 FlashBoot endpoints, and a replace creates the new endpoint before it deletes the old one. So a parked endpoint uses `OFF` (STT-A).
 - `volume.excluded_data_centers = ["<id>"]`: the endpoint does not use these data centers. Their volumes stay, with the weights.
 - `hf_token_secret = "<name>"` adds `HF_TOKEN = "{{ RUNPOD_SECRET_<name> }}"` for a gated repo. Make the secret in the Runpod console first. Not verified on Serverless.
 
@@ -476,6 +479,43 @@ A deployment with `platform_options.runpod.volume` needs its weights on the volu
 3. Run `./scripts/hcp-sync.py --dry-run`, then `./scripts/hcp-sync.py`. Every HCP workspace gets `RUNPOD_API_KEY` as a sensitive env var. A root that declares the `runpod` provider (LLM-A, STT-A, `infra/core`) fails at plan without the key. `infra/core` needs the key too, because its variable `runpod_api_key` has no default.
 4. Apply `infra/core`. It writes the key to the secret `runpod-api-key` (write-only, not in state). To rotate the key: change `.env`, run `hcp-sync.py`, and raise `secret_data_wo_version` in `infra/core/provider_keys.tf`.
 5. Gated Hugging Face repos only: make a Runpod secret with the Hugging Face token (console, Secrets) and set `platform_options.runpod.hf_token_secret`.
+
+### Module: platform-modal
+
+`modules/platform-modal/` is the Modal adapter. Modal has no Terraform provider, so the module creates no resource. It only computes the `target` and the input of the post-apply step. Research and measurements: `docs/research/10-modal-stt-a.md`.
+
+- Own images only (`spec.image.own`, from `<region>-docker.pkg.dev/<project>/models/<own>`). A stock image fails at plan.
+- The shared app file `scripts/platforms/modal_app.py` runs every Modal model. It removes the image ENTRYPOINT (Modal must start its own runtime), links `python` to `python3` (the vLLM base image has no `python`), and starts `options.command` in `options.workdir`. A request goes in only after `spec.health_route` answers 200. At shutdown, the engine gets SIGTERM. The app file is Modal code that the modal CLI runs: an accepted exception to the standard-library-only rule of `scripts/`.
+- GPU: `options.gpus` is a fallback list (default `["L4", "A10"]`). Modal tries them in this order. No region pin (a pinned region costs 1.15 to 1.75 times more). The Modal type `A10` gives a plain A10 or an A10G.
+- Size: `options.cpu` (physical cores, default 4) and `options.memory_mb` (default 32768).
+- Scale: 0 to `spec.max_replicas` containers, `scaledown_window = spec.idle_seconds` (at most 1200 s, the Modal limit). A request at 0 containers waits for the container.
+- Weights: the Modal Volume `options.volume` (default `<name>-weights`), mounted at `/models`. Env `MODEL = /models/<spec.weights.gcs_dir>`. A Volume is not pinned to a region. `scripts/platforms/modal.py` fills it from Hugging Face with `options.hf_repos` (Volume folder to repo; files that are already there are skipped).
+- Env: `spec.env`, then `PORT`, `HF_HUB_OFFLINE = "1"`, `SETUP_PLATFORM = "modal"` and `MODEL` (the container contract), `PYTHONFAULTHANDLER = "1"` (a segfault prints the Python stack of each thread), then `options.env`.
+- Thread stack: Modal runs containers with `ulimit -s unlimited`, so glibc gives each new thread only 2 MB of stack. `modal_app.py` starts the command with a 64 MB stack limit. Without it, the STT-A model load (in a thread) ended in SIGSEGV on most starts. See `docs/research/10-modal-stt-a.md`, section "Crash cause".
+- Options: `workspace` (required, the Modal workspace name, from `.env` `MODAL_PROFILE`), `command` (required), `workdir` (default `/`), `name`, `gpus`, `cpu`, `memory_mb`, `timeout` (default 600 s: the start limit and the request limit of the Modal function), `volume`, `hf_repos`, `env`.
+
+Output `target`: `{ id = "modal", label = "Modal", url = "https://<workspace>--<name>.modal.run", append_path = true, auth = "modal", cold_start = "retry-429", deadline = 300, post_apply = "modal" }`. Also `modal` (the input of `scripts/platforms/modal.py`).
+
+Post-apply (`./scripts/deploy.py deploy deployments/<name> --platform modal`): `scripts/platforms/modal.py` reads the output `modal` and the `infra/core` output `registry_pull_key`, and runs the modal CLI (pinned version, through `uvx`): `modal run modal_app.py::fill` (the weights Volume), then `modal deploy modal_app.py`. The secrets go to Modal from the local env at deploy time: the pull key, `HF_TOKEN`, `SLACK_BOT_TOKEN` and `SLACK_CHANNEL`. `undeploy` runs `modal app stop`. A stopped app answers 404, and a new `deploy` starts it again.
+
+### Modal setup (once)
+
+1. Make a Modal account (Starter plan, $30 free credit per month) and add a payment card (a GPU needs one).
+2. Run `uvx modal token new`, or make a token in the dashboard. Put `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` and `MODAL_PROFILE` (the workspace name) in `.env`.
+3. Make a proxy token for the CORS proxies: `uvx modal workspace proxy-tokens create --name cors-proxy`, or in the dashboard. Put its ID (`wk-...`) and secret (`ws-...`) in `.env` as `MODAL_PROXY_TOKEN_ID` and `MODAL_PROXY_TOKEN_SECRET`.
+4. Run `direnv allow` (`.envrc` joins the 2 values to `<id>.<secret>`, the Bearer form, as `TF_VAR_modal_api_key`), then `./scripts/hcp-sync.py --dry-run` and `./scripts/hcp-sync.py`. `infra/core` gets `modal_api_key` (the same joined value), and every deployment that declares the variable `modal_workspace` gets it.
+5. Apply `infra/core`. It writes the proxy token to the secret `modal-api-key` (write-only, not in state). To rotate it, make a new token, change the 2 values in `.env`, run `hcp-sync.py`, and raise `secret_data_wo_version` of `modal_api_key` in `infra/core/provider_keys.tf`.
+
+### Add Modal to a deployment
+
+The adapter, the app file and the post-apply step are shared, so a new Modal model needs only changes in its own folder. STT-A (`deployments/stt-a-qwen3-asr-diar`) is the example.
+
+1. The image must be an own image in the repo `models` that follows the container contract: it listens on `PORT`, reads the weights from `MODEL`, and answers 200 at `spec.health_route` only when the model is loaded. A stock image (for example `vllm/vllm-openai`) does not work yet.
+2. In `main.tf`, add `"modal"` to `local.platforms`, and add `platform_options.modal` with `workspace = var.modal_workspace`, `command` (the image ENTRYPOINT: Modal does not run it), `workdir`, `volume`, `gpus` and `hf_repos` (Volume folder to Hugging Face repo, so that `MODEL` points to the weights). For Slack messages, the image posts them itself; set `env = { SLACK_TITLE = "..." }`.
+3. Add `variable "modal_workspace"` (string) to `variables.tf`, and `output "modal" { value = module.model.modal }` to `outputs.tf`. `scripts/hcp-sync.py` gives `modal_workspace` to every folder that declares it.
+4. In the tests, set `modal_workspace = "ws"` in the `variables` block.
+5. Run `./scripts/hcp-sync.py`, apply the deployment, then run `./scripts/deploy.py deploy deployments/<name> --platform modal`. The first deploy fills the Volume from Hugging Face.
+6. Test 1 cold call through the gateway path `/modal/<route>`, and check the Slack "ready" and "scaled to 0" messages. Write the cold start in the README of the deployment.
 
 ### Module: gateway
 
@@ -522,8 +562,9 @@ Vertex AI does not answer `OPTIONS` on `:rawPredict`, and it sends no CORS heade
 - It forwards `GET` and `POST` to a target, streams the answer back, and adds the CORS headers to every answer, also to the 429.
 - Targets: the input `targets` maps a platform id to `{ url, append_path, auth }`. The first path segment picks the target: `/vertex/v1/chat/completions` goes to `vertex` with the path `/v1/chat/completions`. A path without a known platform segment (the old paths, for example `/v1/chat/completions`) goes to `default_platform` with the full path. The query string stays.
 - `append_path = true`: the proxy appends the path to `url` (Vertex AI `:invoke` base). `append_path = false`: `url` is one fixed URL (Vertex AI `:rawPredict`).
-- `auth = "google"`: the proxy sends its own access token. `runpod`: the proxy sends `Authorization: Bearer <key>` with the key from `RUNPOD_API_KEY`. These come from Secret Manager through the input `secret_env` (env name to secret ID). A missing key gives HTTP 502 with CORS headers.
+- `auth = "google"`: the proxy sends its own access token. `runpod` and `modal`: the proxy sends `Authorization: Bearer <key>` with the key from `RUNPOD_API_KEY` or `MODAL_API_KEY`. These come from Secret Manager through the input `secret_env` (env name to secret ID). A missing key gives HTTP 502 with CORS headers.
 - Cold start on Runpod: at 0 workers Runpod holds the request until a worker is up. For a target with a key, the proxy waits `COLD_WAIT` seconds (env, default 280, below the 300 s gateway deadline) for the answer headers. Then it answers 429 with `Retry-After: 30`, so the UI and the STT-A `stt_api` retry as for Vertex AI. The held request still starts the worker. Exception: when the target answered in the last `WARM_SECONDS` (env, default 300, the idle time), a worker is up and the request is only slow, so the proxy answers 504 (a retry would run the long request again). This memory is per proxy instance. After the headers, the body may take up to `TIMEOUT`. A "no workers available" answer also becomes 429 (`cold_answer`).
+- Modal: a Modal web endpoint stops a request after 150 s and answers 303 with a result URL. A cold start of STT-A takes about 160 s, so every cold call gets it. For `auth = "modal"`, the proxy follows a 302 or 303 with a `GET` and the same key (at most 10 hops). The time of all hops counts against `COLD_WAIT`, so the 429 rule above stays the same.
 - It scales to zero (max 2 instances). The gateway SA has `roles/run.invoker`, and the service accounts in `extra_invokers` (STT-A: `stt_api`). The proxy SA has `roles/aiplatform.user` only when a target has `auth = "google"` (on the project: the provider has no IAM resource for 1 endpoint).
 - Inputs: `project_id`, `region`, `name`, `image`, `targets`, `default_platform`, `secret_env` (default `{}`), `timeout` (default `"300s"`), `gateway_service_account_email`, `extra_invokers` (default `[]`). Outputs: `url`, `service_name`, `service_account_email`, `env`, `secret_env`, `predict_bindings`, `extra_invoker_count` (the last 4 for tests).
 - The gateway must use `path_translation = "APPEND_PATH_TO_ADDRESS"`, so the proxy sees the path.
@@ -559,6 +600,10 @@ Runpod writes no logs to GCP, so the alerts above cannot see it. The own images 
 5. Limits: a SIGKILL or a crash sends no "scaled to 0". The Runpod docs do not say if a load balancing worker gets SIGTERM at scale down, so check the first scale down in Slack. Cost: 0 (no poll).
 
 `./scripts/hcp-sync.py` makes the 2 Runpod secrets from `.env`: `slack_bot_token` from `SLACK_BOT_TOKEN`, and `slack_channel` from `SLACK_CHANNEL`. The Runpod provider has no secret resource, so the script uses the Runpod REST API (`/v2/account/secrets`). It creates a missing secret and sets the value of an existing one on each run. `--dry-run` only reads the secret names. Run it before the apply of STT-A or LLM-B. To rotate the token, change `.env` and run the script again. A new worker reads the new value at start.
+
+### Modal (own images: Slack from the container)
+
+Modal writes no logs to GCP either. The engine posts its own Slack messages, as on Runpod. `platform_options.modal.env` sets `SLACK_TITLE`. `scripts/platforms/modal.py` gives `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` from `.env` to Modal as a secret at each deploy. The app file sends SIGTERM to the engine at shutdown, so the "scaled to 0" message goes out.
 
 ### Runpod (job scale-watch)
 

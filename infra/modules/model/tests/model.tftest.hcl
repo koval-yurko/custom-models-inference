@@ -112,7 +112,7 @@ run "rejects_duplicates" {
 run "unknown_platform_fails" {
   command = plan
   variables {
-    platforms = ["vertex", "modal"]
+    platforms = ["vertex", "baseten"]
   }
   expect_failures = [var.platforms]
 }
@@ -251,5 +251,45 @@ run "own_image_volume_extra_paths" {
   assert {
     condition     = output.proxy_url == "https://proxy" && output.vertex_service_account_email != null
     error_message = "proxy URL and Vertex AI SA outputs"
+  }
+}
+
+# Modal: own image only, no resource; the proxy gets the Modal target and the Modal key.
+run "modal" {
+  command = apply
+
+  variables {
+    name       = "stt-a-qwen3-asr-diar"
+    gateway_id = "stt-a-qwen3-asr-diar"
+    platforms  = ["modal", "vertex"]
+    spec = {
+      image        = { own = "stt-a-qwen3-asr-diar:0.2.4" }
+      args         = []
+      health_route = "/health"
+      routes       = ["/v1beta/interactions"]
+      gpu          = "L4"
+      weights      = { hf_repo = "Qwen/Qwen3-ASR-1.7B", gcs_dir = "stt-a-qwen3-asr-diar" }
+    }
+    platform_options = {
+      modal  = { workspace = "ws", command = ["python3", "-m", "speech_engine.main"] }
+      vertex = { predict_route = "/v1beta/interactions" }
+    }
+  }
+
+  assert {
+    condition     = jsondecode(module.cors_proxy.env.TARGETS).modal == { url = "https://ws--stt-a-qwen3-asr-diar.modal.run", append_path = true, auth = "modal" } && module.cors_proxy.env.DEFAULT == "modal"
+    error_message = "the proxy gets the modal target; modal is the default"
+  }
+  assert {
+    condition     = module.cors_proxy.secret_env == tomap({ MODAL_API_KEY = "modal-api-key" })
+    error_message = "the proxy reads the Modal key from the secret modal-api-key"
+  }
+  assert {
+    condition     = output.modal.app == "stt-a-qwen3-asr-diar" && output.targets.modal.post_apply == "modal" && output.targets.vertex.post_apply == "vertex"
+    error_message = "modal output for scripts/platforms/modal.py"
+  }
+  assert {
+    condition     = contains(keys(output.openapi.paths), "/modal/v1beta/interactions") && [for p in output.ui_platforms : p.id] == ["modal", "vertex"]
+    error_message = "gateway path and UI platform for modal"
   }
 }

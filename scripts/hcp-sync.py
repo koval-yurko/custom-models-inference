@@ -37,12 +37,14 @@ TOKEN = os.environ["TF_TOKEN_app_terraform_io"]
 BASE = "https://app.terraform.io/api/v2"
 E = os.environ.get
 
+# The Modal proxy token in its Bearer form <id>.<secret> (the secret modal-api-key that the CORS proxies send).
+MODAL_API_KEY = f"{E('MODAL_PROXY_TOKEN_ID')}.{E('MODAL_PROXY_TOKEN_SECRET')}" if E("MODAL_PROXY_TOKEN_ID") and E("MODAL_PROXY_TOKEN_SECRET") else None
 # workspace -> (working directory, terraform variables). A variable is skipped when its .env value is empty.
 COMMON = {"project_id": E("GCP_PROJECT_ID"), "region": E("GCP_REGION")}
 WORKSPACES = {
     # infra/core. The workspace keeps its old name, so the state stays.
     "custom-models-bootstrap": ("infra/core", {**COMMON, "billing_account": E("BILLING_ACCOUNT"), "budget_amount": E("BUDGET_AMOUNT"),
-                                      "hf_token": E("HF_TOKEN"), "runpod_api_key": E("RUNPOD_API_KEY"),
+                                      "hf_token": E("HF_TOKEN"), "runpod_api_key": E("RUNPOD_API_KEY"), "modal_api_key": MODAL_API_KEY,
                                       "slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL"),
                                       "runpod_s3_access_key": E("RUNPOD_S3_ACCESS_KEY"), "runpod_s3_secret_key": E("RUNPOD_S3_SECRET_KEY")}),
     # Deployments use the shared module outside their folder, so the CLI uploads the repo root.
@@ -52,12 +54,18 @@ WORKSPACES = {
     # STT-A. The folder lost its "-vertex" suffix (it runs on several platforms). The workspace keeps the old name, so the state stays.
     "custom-models-stt-a-qwen3-asr-diar-vertex": ("deployments/stt-a-qwen3-asr-diar", COMMON),
 }
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+# modal_workspace (the Modal workspace name in the Modal web URL; MODAL_PROFILE is that name) goes to every folder that
+# declares the variable, so a new Modal deployment needs no change here.
+for _ws, (_dir, _vars) in WORKSPACES.items():
+    if any('variable "modal_workspace"' in f.read_text() for f in (ROOT / _dir).glob("*.tf")):
+        WORKSPACES[_ws] = (_dir, {**_vars, "modal_workspace": E("MODAL_PROFILE")})
 # Env vars for every workspace: the GPU platform providers read their key from it (they fail without one).
 PROVIDER_KEYS = {"RUNPOD_API_KEY": E("RUNPOD_API_KEY")}
 # Runpod account secret -> .env value. Runpod templates read them as {{ RUNPOD_SECRET_<name> }} (own images: Slack messages).
 RUNPOD_SECRETS = {"slack_bot_token": E("SLACK_BOT_TOKEN"), "slack_channel": E("SLACK_CHANNEL")}
 RUNPOD_API = "https://api.runpod.io/v2/account/secrets"
-SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "runpod_s3_access_key", "runpod_s3_secret_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
+SENSITIVE = {"hf_token", "slack_bot_token", "runpod_api_key", "modal_api_key", "runpod_s3_access_key", "runpod_s3_secret_key", "GOOGLE_CREDENTIALS", *PROVIDER_KEYS}
 
 
 def api(method, path, body=None):

@@ -27,6 +27,16 @@ class ProviderKeys(unittest.TestCase):
         self.assertEqual(self.sync.WORKSPACES["custom-models-bootstrap"][1]["runpod_api_key"], "k")
 
 
+class ModalWorkspace(unittest.TestCase):
+    def test_only_folders_that_declare_the_variable_get_it(self):
+        with mock.patch.dict(os.environ, {"MODAL_PROFILE": "ws"}):
+            sync = load()
+        got = {d for d, v in sync.WORKSPACES.values() if v.get("modal_workspace") == "ws"}
+        self.assertIn("deployments/stt-a-qwen3-asr-diar", got)
+        self.assertNotIn("infra/core", got)
+        self.assertNotIn("modal_workspace", sync.COMMON)  # the shared dict stays unchanged
+
+
 class RunpodSecrets(unittest.TestCase):
     def setUp(self):
         self.sync = load()

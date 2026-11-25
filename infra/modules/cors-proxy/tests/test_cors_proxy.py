@@ -7,6 +7,7 @@ _spec.loader.exec_module(cp)
 T = {
     "vertex": {"url": "https://v/x:rawPredict", "append_path": False, "auth": "google"},
     "runpod": {"url": "https://r", "append_path": True, "auth": "runpod"},
+    "modal": {"url": "https://ws--m.modal.run", "append_path": True, "auth": "modal"},
 }
 
 
@@ -159,6 +160,86 @@ class Mapping(unittest.TestCase):
     def test_good_answer_streams_through(self):
         status, _, cors, body = self.call((200, [("Content-Type", "text/event-stream")], b"data: 1\n\ndata: 2\n\n"))
         self.assertEqual((status, cors, body), (200, "*", b"data: 1\n\ndata: 2\n\n"))
+
+
+class Redirect(unittest.TestCase):
+    def test_modal_303_is_followed(self):
+        self.assertEqual(cp.redirect("modal", 303, [("Location", "/v1/x?__modal_function_call_id=fc-1")], "https://m/v1/x"),
+                         "https://m/v1/x?__modal_function_call_id=fc-1")
+
+    def test_absolute_location_kept(self):
+        self.assertEqual(cp.redirect("modal", 302, [("location", "https://other/r")], "https://m/v1/x"), "https://other/r")
+
+    def test_other_platforms_and_codes_are_not_followed(self):
+        self.assertIsNone(cp.redirect("runpod", 303, [("Location", "/r")], "https://r/v1/x"))
+        self.assertIsNone(cp.redirect("modal", 200, [("Location", "/r")], "https://m/v1/x"))
+        self.assertIsNone(cp.redirect("modal", 303, [], "https://m/v1/x"))
+
+    def test_modal_key(self):
+        self.assertEqual(cp.auth_header("modal", {"MODAL_API_KEY": "wk-1.ws-2"}, None), "Bearer wk-1.ws-2")
+
+
+class FakeHops:
+    """Like FakeUpstream, but each connection takes the next answer of answers and logs (method, netloc, path, headers)."""
+    answers, log = [], []
+
+    def __init__(self, netloc, timeout=None):
+        self.netloc, self.timeout = netloc, timeout
+
+    def request(self, method, path, body=None, headers=None):
+        FakeHops.log.append((method, self.netloc, path, headers, self.timeout))
+
+    def getresponse(self):
+        import io
+        a = FakeHops.answers.pop(0)
+        if a is None:
+            raise TimeoutError("timed out")
+        status, headers, body = a
+        r = io.BufferedReader(io.BytesIO(body))
+        r.status, r.getheaders = status, lambda: headers
+        return r
+
+    def close(self):
+        pass
+
+
+class ModalHops(unittest.TestCase):
+    def call(self, answers, cold_wait=5):
+        import http.client, os, threading
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        cp.TARGETS, cp.DEFAULT, cp.TIMEOUT, cp.COLD_WAIT, cp.WARM_SECONDS = T, "vertex", 5, cold_wait, 300
+        FakeHops.answers, FakeHops.log = list(answers), []
+        cp._ok.clear()
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), cp.H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with mock.patch.object(cp.http.client, "HTTPSConnection", FakeHops), mock.patch.dict(os.environ, {"MODAL_API_KEY": "k"}):
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=5)
+                c.request("POST", "/modal/v1beta/interactions", b"{}", {"Content-Type": "application/json"})
+                r = c.getresponse()
+                return r.status, r.getheader("Retry-After"), r.getheader("Access-Control-Allow-Origin"), r.read()
+        finally:
+            srv.shutdown()
+
+    def test_303_is_followed_with_get_and_the_key(self):
+        loc = [("Location", "/v1beta/interactions?__modal_function_call_id=fc-1")]
+        status, _, cors, body = self.call([(303, loc, b""), (200, [("Content-Type", "application/json")], b'{"ok":1}')])
+        self.assertEqual((status, cors, body), (200, "*", b'{"ok":1}'))
+        (m1, n1, p1, h1, _), (m2, n2, p2, h2, t2) = FakeHops.log
+        self.assertEqual((m1, p1, m2, n2, p2), ("POST", "/v1beta/interactions", "GET", "ws--m.modal.run",
+                                                 "/v1beta/interactions?__modal_function_call_id=fc-1"))
+        self.assertEqual(h2, {"Authorization": "Bearer k"})
+        self.assertLessEqual(t2, 5)  # the hop gets only the rest of COLD_WAIT
+
+    def test_no_answer_after_a_hop_is_429(self):
+        status, retry, cors, _ = self.call([(303, [("Location", "/r")], b""), None])
+        self.assertEqual((status, retry, cors), (429, "30", "*"))
+
+    def test_hops_stop_at_max(self):
+        hops = [(303, [("Location", "/r")], b"")] * (cp.MAX_HOPS + 1)
+        status, _, _, _ = self.call(hops)
+        self.assertEqual(status, 303)  # MAX_HOPS redirects followed; the last 303 goes back as is
 
 
 class Headers(unittest.TestCase):

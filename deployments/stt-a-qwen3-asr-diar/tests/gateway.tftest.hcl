@@ -26,7 +26,8 @@ override_data {
 }
 
 variables {
-  project_id = "p"
+  project_id      = "p"
+  modal_workspace = "ws"
 }
 
 run "gateway_requires_api_key" {
@@ -41,7 +42,7 @@ run "gateway_requires_api_key" {
     error_message = "only the OPTIONS (CORS preflight) operations may override the global security"
   }
   assert {
-    condition = toset(keys(module.model.openapi.paths)) == toset(flatten([for prefix in ["", "/vertex", "/runpod"] : [
+    condition = toset(keys(module.model.openapi.paths)) == toset(flatten([for prefix in ["", "/modal", "/vertex", "/runpod"] : [
       for p in ["/v1beta/files", "/v1beta/files/{id}", "/v1beta/files/{id}/audio", "/v1beta/files/{id}/reference", "/v1beta/files/{id}/transcribe", "/v1beta/files/{id}/versions/{version_id}", "/v1beta/files/{id}/versions/{version_id}/names", "/v1beta/files/{id}/versions/{version_id}/score", "/v1beta/interactions", "/v1beta/scores", "/v1beta/uploads"] : "${prefix}${p}"
     ]]))
     error_message = "the gateway exposes the interactions and files paths, the old ones and /vertex/ and /runpod/ (/health stays private)"

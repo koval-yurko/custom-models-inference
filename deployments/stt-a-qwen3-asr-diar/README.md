@@ -1,15 +1,16 @@
-# STT-A: Qwen3-ASR with speaker diarization, on Vertex AI and Runpod
+# STT-A: Qwen3-ASR with speaker diarization, on Modal, Vertex AI and Runpod
 
 Speech to text with a speaker for each word, behind the Gemini 3.5 Transcribe contract. Design: [`docs/specs/2026-11-21-stt-a-design.md`](../../docs/specs/2026-11-21-stt-a-design.md). Research: [`docs/research/06-stt-diarization.md`](../../docs/research/06-stt-diarization.md).
 
 - 1 own GPU image (`services/speech_engine/`, `FROM vllm/vllm-openai:v0.14.0`) runs 3 models: Qwen3-ASR-1.7B (text, 30 languages), Qwen3-ForcedAligner-0.6B (word times, 11 languages) and Pyannote `speaker-diarization-community-1` (speakers). `qwen-asr` 0.0.6 pins vLLM 0.14.0, so the base is older than LLM-B.
 - Pipeline: Pyannote finds the speaker turns first. Then ASR runs on each turn, and each word gets the speaker of its turn. In the 19 languages without the aligner, the word times are estimates (by character count). The speaker is always from the turn.
-- 2 GPU platforms with the same image (`local.platforms = ["vertex", "runpod"]` in `main.tf`, module `infra/modules/model`). Both scale to zero (max 1 replica, idle time 300 s). 1 request at a time.
+- 3 GPU platforms with the same image (`local.platforms = ["modal", "vertex", "runpod"]` in `main.tf`, module `infra/modules/model`). All scale to zero (max 1 replica, idle time 300 s). 1 request at a time. Modal is the default (the first in the list): on 2026-11-25 it was the only platform with a free GPU.
+  - Modal: app `stt-a-qwen3-asr-diar`, 1 L4, or an A10 when no L4 is free (`gpus = ["L4", "A10"]`, 24 GB, $0.80/h against $1.10/h), 4 cores, 32 GiB, no region pin. Modal pulls the image from the repo `models` with the `infra/core` pull key. `scripts/platforms/modal.py` deploys it (Modal has no Terraform provider). Research: [`docs/research/10-modal-stt-a.md`](../../docs/research/10-modal-stt-a.md).
   - Vertex AI: private endpoint in `us-central1`, `g2-standard-12`, 1 `NVIDIA_L4`.
   - Runpod: load balancing endpoint, 1 GPU of 24 GB (pools `AMPERE_24` and `ADA_24`: A5000, 3090, L4, 4090), only in the data centers of its network volumes (`EU-RO-1`, `EUR-IS-1`, `EU-CZ-1`: 1 volume each, so a worker can start where a GPU is free). Runpod pulls the image from the Artifact Registry repo `models` with the `infra/core` credential `gcp-models`.
-- Weights: `gs://<project_id>-models/stt-a-qwen3-asr-diar/{asr,aligner,pyannote}/`. On Vertex AI, `speech_engine/models.py` copies them to `/tmp/models` at start. On Runpod, they are on the network volume at `/runpod-volume/stt-a-qwen3-asr-diar/` (env `MODEL`). `scripts/runpod-weights.py` copies them there from GCS, so both platforms load the same files.
-- Public API Gateway `stt-a-qwen3-asr-diar` checks `x-api-key`. Each path is there 3 times: the old path (the default platform, Vertex AI), `/vertex/...` and `/runpod/...`.
-  - `POST /v1beta/interactions` goes to the CORS proxy `stt-a-qwen3-asr-diar-proxy`, then to Vertex AI `:rawPredict` or to the Runpod endpoint. Deadline 300 s.
+- Weights: `gs://<project_id>-models/stt-a-qwen3-asr-diar/{asr,aligner,pyannote}/`. On Vertex AI, `speech_engine/models.py` copies them to `/tmp/models` at start. On Runpod, they are on the network volume at `/runpod-volume/stt-a-qwen3-asr-diar/` (env `MODEL`). `scripts/runpod-weights.py` copies them there from GCS, so both platforms load the same files. On Modal, they are on the Modal Volume `stt-a-weights` at `/models/stt-a-qwen3-asr-diar/` (env `MODEL`). `scripts/platforms/modal.py` fills it from the same Hugging Face repos.
+- Public API Gateway `stt-a-qwen3-asr-diar` checks `x-api-key`. Each path is there 4 times: the old path (the default platform, Modal), `/modal/...`, `/vertex/...` and `/runpod/...`.
+  - `POST /v1beta/interactions` goes to the CORS proxy `stt-a-qwen3-asr-diar-proxy`, then to the Modal web endpoint, Vertex AI `:rawPredict` or the Runpod endpoint. Deadline 300 s. A cold Modal call takes about 160 s: Modal answers 303 at 150 s, and the proxy follows it.
   - `POST /v1beta/uploads` and `/v1beta/files...` go to the CPU STT API service `stt-a-qwen3-asr-diar-api` (`services/stt_api/`, own small image). It gives signed `PUT` URLs (15 minutes, up to 500 MB) for `gs://<project_id>-stt-audio/files/<id>/audio`, lists the files, and keeps the transcript history. "Transcribe again" calls the GPU through the CORS proxy (`<proxy>/<platform>/v1beta/interactions`; the path prefix picks the platform) with a signed `GET` URL of the audio, and saves the answer as a new version. The files are the same on both platforms.
 - Files and versions are kept forever (no automatic delete). Only runs of `POST /v1beta/files/<id>/transcribe` are saved. A direct `/v1beta/interactions` call is not saved, so test scripts use `transcribe`.
 - The test UI has a tab for it (type `stt`): the files list, the versions of a file, "Transcribe again" with a label, and 2 versions side by side.
@@ -62,6 +63,8 @@ Do `infra/core` first (see `infra/README.md`). It makes the gateway API `stt-a-q
 
 Before the first Runpod apply: make a Runpod S3 API key (Runpod console, Settings, "S3 API keys") and put it in `.env` as `RUNPOD_S3_ACCESS_KEY` and `RUNPOD_S3_SECRET_KEY`. 24 GB GPUs are often out of stock in 1 data center: a worker then shows THROTTLED and never starts. That is why `volume.data_centers` in `main.tf` lists 3 data centers. Each must have the S3 API (list: [Runpod S3 API](https://docs.runpod.io/serverless/storage/s3-api)). To add one, add it to the list, apply, and run the weights copy again.
 
+Before the first Modal apply: do [Modal setup (once)](../../infra/README.md#modal-setup-once) (tokens, the proxy token `MODAL_PROXY_TOKEN_ID` and `MODAL_PROXY_TOKEN_SECRET`, `hcp-sync.py`, apply `infra/core`). The STT-A workspace needs `modal_workspace` (from `MODAL_PROFILE`).
+
 0. Accept the user conditions of [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) with the Hugging Face account of `HF_TOKEN`. Without it, the Pyannote copy in step 1 fails.
 1. Sync the HCP workspace `custom-models-stt-a-qwen3-asr-diar-vertex` (the old name of this folder; it keeps the state). Apply core again for the bucket and the gateway API. Then check the L4 quota. The weights check fails until step 2 is done.
    ```sh
@@ -80,7 +83,7 @@ Before the first Runpod apply: make a Runpod S3 API key (Runpod console, Setting
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
@@ -94,9 +97,10 @@ Before the first Runpod apply: make a Runpod S3 API key (Runpod console, Setting
    ./scripts/runpod-weights.py deployments/stt-a-qwen3-asr-diar --dry-run
    ./scripts/runpod-weights.py deployments/stt-a-qwen3-asr-diar --cloud
    ```
-6. Upload and deploy the Vertex AI model. It takes up to 45 minutes. Runpod needs no step: its endpoint is ready after apply. At the end, the script updates the test UI config.
+6. Deploy the Modal app and the Vertex AI model. Modal: the script fills the Volume `stt-a-weights` from Hugging Face (files already there are skipped), then runs `modal deploy` (the first image pull takes about 4 minutes). Vertex AI: model upload and deploy, up to 45 minutes. Runpod needs no step: its endpoint is ready after apply. At the end, the script updates the test UI config.
    ```sh
-   ./scripts/deploy.py deploy deployments/stt-a-qwen3-asr-diar
+   ./scripts/deploy.py deploy deployments/stt-a-qwen3-asr-diar --platform modal
+   ./scripts/deploy.py deploy deployments/stt-a-qwen3-asr-diar --platform vertex
    ```
 7. Update the test UI (new panel code).
    ```sh
@@ -111,14 +115,14 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.3 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
    gcloud artifacts docker images list $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models --include-tags \
      --filter="package~stt-a-qwen3-asr-diar" --format="table(package,tags)"
    ```
-   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.3` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
+   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.5` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
 2. Undeploy the GPU model. The model upload holds the image tag, so a new image needs a new upload.
    ```sh
    ./scripts/deploy.py undeploy deployments/stt-a-qwen3-asr-diar
@@ -224,7 +228,7 @@ curl -s "$GW/v1beta/files/$ID/versions/$V/score" -H "x-api-key: $KEY" | python3 
 curl -s "$GW/v1beta/scores" -H "x-api-key: $KEY" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['setups'], indent=1))"
 ```
 
-Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.3` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
+Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.5` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
 
 Delete a stored file by hand (there is no delete route): `gcloud storage rm -r gs://$GCP_PROJECT_ID-stt-audio/files/<id>/`.
 
@@ -249,6 +253,10 @@ Checks only a real deploy can do (write the results here):
 | 2026-11-21 | 0.1.3 | Deploy, attempt 2 (same command, the uploaded model is reused) | 12 min (23:10:38 to 23:22:43 UTC) | First container log after 6.4 min (the node probably had the image). Weights copy 63 s, `models ready` 3 min 42 s after the container start. |
 | 2026-11-22 | 0.1.3 | Scale up from 0 (first `transcribe` call to HTTP 201) | 7 min 19 s (13:33:18 to 13:40:37 UTC) | Container start after 3 min 14 s, weights copy 69 s, `models ready` at 13:40:12 (6 min 54 s). A try on 2026-11-21 reached `models ready` in 7 min 3 s, but the next call got no answer (the connection closed after 75 s, no log in the STT API service). A new gateway config went live a few minutes before. |
 | 2026-11-24 | 0.2.1, 0.2.2 | Runpod scale up from 0 (`/runpod/v1beta/files/<id>/transcribe`, first call 13:26:45 UTC, retry every 30 s; again at 14:18:44 with 0.2.2) | failed: `429` for 25 min, then stopped by hand | RTX 4090, EU-RO-1, network volume `ygncm7cg2c`. GPU wait (THROTTLED, INITIALIZING) 4 min with 0.2.1 and 10 min with 0.2.2. Container start to `models ready`: 78 s with 0.2.1 (13:30:34 to 13:31:52), 65 s with 0.2.2 (14:29:24 to 14:30:29). The load balancer never routed a call, and Runpod stopped the container every 9 to 10 min. 0.2.2 listens on `[::]:8080` and logs each health code change: no health request reached the container. LLM-A (stock vLLM, A5000, CA-MTL-1, no volume) answered `200` after 266 s on the same day. |
+| 2026-11-25 | 0.2.4 | Modal spike, scale up from 0 (`POST /v1beta/interactions` direct to the Modal URL, inline `two.wav`), 4 cold starts | 157.5 to 169.0 s to HTTP 200 (3 starts); 354.8 s with 2 engine crashes | GPU (A10G) 4 to 7 s after the request. Container start to `models ready` 130 to 153 s: imports 32 s, vLLM engine start 53 s, `torch.compile` 26 s, graphs 6 s, aligner and Pyannote 10 s. Modal answered 303 at 150 to 161 s; 1 redirect, then 200. The 2 crashes (SIGSEGV) came with the vLLM compile cache on a Volume, which is removed. Warm call 3.1 s. Details: `docs/research/10-modal-stt-a.md` |
+| 2026-11-25 | 0.2.3 | Modal through the gateway (`/modal/v1beta/files/<id>/transcribe`) | failed first: 5 of 5 container starts ended with SIGSEGV after vLLM was ready, proxy `429` at 281 s and 592 s. Then 1 start (A10G) was good: warm `transcribe` `201` in 9 s, with `diarization: true` `201` in 3 s (`spk_1`, `spk_2`, 37 words) | The cause of the crash is open (not the compile cache). `PYTHONFAULTHANDLER=1` is on. Details: `docs/research/10-modal-stt-a.md`, section "Integration test" |
+| 2026-11-25 | 0.2.5 | Modal through the gateway, cold (`transcribe` with `diarization: true`, retry every 30 s), GPU list L4 then A10 | `201` after about 940 s (3 tries got `429`) | 7 starts: A10 6 crashed (SIGSEGV), L4 1 crashed, A10G good. Answer: `spk_1` 23 and `spk_2` 14 words. Slack "ready" and "scaled to 0" work from 0.2.5 (0.2.3 had no Slack code). After this run: L4 only |
+| 2026-11-25 | 0.2.5 | Modal through the gateway, cold, `gpus = ["L4"]`, after the thread stack fix in `modal_app.py` | `201` after 1058 s (3 tries got `429`) | GPU wait about 15 min (no free L4: call 17:40:38, container start 17:55:48). Container start to `models ready`: 132.9 s, no crash. Scale to 0 (Slack "scaled to 0") 5 min 48 s after the answer. Before the fix, 3 of 3 L4 starts that afternoon ended in SIGSEGV. See `docs/research/10-modal-stt-a.md`, section "Crash cause". |
 
 Runpod: the first cold start that reaches `200` is not measured yet (see the 2026-11-24 row). The proxy answers `429` every 280 s while the worker starts, so count from the first try.
 

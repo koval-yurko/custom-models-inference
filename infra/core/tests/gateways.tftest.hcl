@@ -16,6 +16,7 @@ variables {
   billing_account      = "000000-000000-000000"
   hf_token             = "test"
   runpod_api_key       = "test"
+  modal_api_key        = "test"
   runpod_s3_access_key = "test"
   runpod_s3_secret_key = "test"
   slack_bot_token      = "test"

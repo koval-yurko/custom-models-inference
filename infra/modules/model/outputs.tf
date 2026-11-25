@@ -53,6 +53,11 @@ output "vertex" {
   value       = try(module.vertex[0].vertex, null)
 }
 
+output "modal" {
+  description = "Input for scripts/platforms/modal.py. null without modal."
+  value       = try(module.modal[0].modal, null)
+}
+
 output "vertex_endpoint_id" {
   description = "Vertex AI endpoint ID. null without vertex."
   value       = try(module.vertex[0].endpoint_id, null)

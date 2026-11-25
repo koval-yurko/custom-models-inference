@@ -26,7 +26,8 @@ override_data {
 }
 
 variables {
-  project_id = "p"
+  project_id      = "p"
+  modal_workspace = "ws"
 }
 
 run "stt_api_service" {
@@ -56,9 +57,9 @@ run "stt_api_service" {
     condition = local.stt_api_env == {
       AUDIO_BUCKET = "p-stt-audio"
       SA_EMAIL     = module.stt_api.service_account_email
-      IMAGE_TAG    = "0.2.3"
+      IMAGE_TAG    = "0.2.5"
       TARGET       = module.model.proxy_url
-      PLATFORMS    = "vertex,runpod"
+      PLATFORMS    = "modal,vertex,runpod"
     }
     error_message = "the STT API service calls the GPU through the CORS proxy; a path prefix picks the platform"
   }

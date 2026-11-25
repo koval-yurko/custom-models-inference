@@ -26,8 +26,8 @@ variable "targets" {
     error_message = "Every target url must be an https URL."
   }
   validation {
-    condition     = alltrue([for t in values(var.targets) : contains(["google", "runpod"], t.auth)])
-    error_message = "Every target auth must be google or runpod."
+    condition     = alltrue([for t in values(var.targets) : contains(["google", "runpod", "modal"], t.auth)])
+    error_message = "Every target auth must be google, runpod or modal."
   }
 }
 

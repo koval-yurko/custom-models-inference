@@ -35,7 +35,7 @@ flowchart LR
 | Folder | Content |
 |---|---|
 | `infra/core/` | Shared setup. Apply once. |
-| `infra/modules/` | `model` (1 model on a list of platforms, with `platform-vertex`, `platform-runpod`, `gateway`, `cors-proxy`), `model-service` (Cloud Run), `scale-alerts` (Slack) |
+| `infra/modules/` | `model` (1 model on a list of platforms, with `platform-vertex`, `platform-runpod`, `platform-modal`, `gateway`, `cors-proxy`), `model-service` (Cloud Run), `scale-alerts` (Slack) |
 | `deployments/<name>/` | One model: image, flags, gateway, Slack alerts |
 | `scripts/` | Python helpers |
 | `ui/` | React test UI |
@@ -52,6 +52,8 @@ flowchart LR
     B -->|"AIP_STORAGE_URI"| VX["Vertex AI"]
     B -->|"runpod-weights.py<br/>(S3 API)"| NV[("Runpod network volume")]
     NV -->|"/runpod-volume"| RP["Runpod worker"]
+    HF -->|"modal.py<br/>(fill)"| MV[("Modal Volume")]
+    MV -->|"/models"| MC["Modal container"]
 ```
 
-`local.model_dir` in a deployment must match `TARGET_DIR` of the job. A Runpod worker with a volume (STT-A) reads the same folder from `/runpod-volume/<TARGET_DIR>/`. LLM-A on Runpod has no volume: vLLM downloads from Hugging Face at start.
+`local.model_dir` in a deployment must match `TARGET_DIR` of the job. A Runpod worker with a volume (STT-A) reads the same folder from `/runpod-volume/<TARGET_DIR>/`. LLM-A on Runpod has no volume: vLLM downloads from Hugging Face at start. On Modal (STT-A), `scripts/platforms/modal.py` fills a Modal Volume from the same Hugging Face repos, and the container reads `/models/<TARGET_DIR>/`.

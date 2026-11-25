@@ -6,7 +6,7 @@ Run from anywhere (loads the repo .env itself; no direnv needed):
   ./scripts/deploy.py undeploy deployments/<name> [--platform <id>]   # before terraform destroy, or before you remove a platform
   ./scripts/deploy.py status   deployments/<name> [--platform <id>]   # deployed or not, per platform
 It reads `terraform output -json platforms` and `targets`. A target with post_apply runs scripts/platforms/<post_apply>.py
-(only vertex has one: model upload and deploy). A target without post_apply is ready after apply.
+(vertex: model upload and deploy; modal: modal deploy). A target without post_apply (runpod) is ready after apply.
 deploy and undeploy run `ui-deploy.py --config-only` at the end, so the test UI follows each change.
 It does not run terraform apply or destroy.
 """

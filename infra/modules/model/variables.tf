@@ -36,8 +36,8 @@ variable "platforms" {
     error_message = "platforms must not contain an id twice."
   }
   validation {
-    condition     = alltrue([for p in var.platforms : contains(["vertex", "runpod"], p)])
-    error_message = "Supported platform ids: vertex, runpod."
+    condition     = alltrue([for p in var.platforms : contains(["vertex", "runpod", "modal"], p)])
+    error_message = "Supported platform ids: vertex, runpod, modal."
   }
 }
 

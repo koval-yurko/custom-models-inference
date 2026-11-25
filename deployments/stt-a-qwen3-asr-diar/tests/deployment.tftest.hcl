@@ -26,14 +26,15 @@ override_data {
 }
 
 variables {
-  project_id = "p"
+  project_id      = "p"
+  modal_workspace = "ws"
 }
 
 run "custom_container_on_vertex" {
   command = apply
 
   assert {
-    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.2.3"
+    condition     = output.vertex.model_upload.model.containerSpec.imageUri == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:0.2.5"
     error_message = "the image must come from the models repo with the image_tag"
   }
   assert {
@@ -87,7 +88,7 @@ run "setup_record" {
       { name = "SETUP_ASR", value = "Qwen3-ASR-1.7B" },
       { name = "SETUP_ALIGNER", value = "Qwen3-ForcedAligner-0.6B" },
       { name = "SETUP_DIARIZATION", value = "pyannote/speaker-diarization-community-1" },
-      { name = "SETUP_IMAGE_TAG", value = "0.2.3" },
+      { name = "SETUP_IMAGE_TAG", value = "0.2.5" },
       { name = "SETUP_PLATFORM", value = "vertex" },
     ] : contains(output.vertex.model_upload.model.containerSpec.env, e)])
     error_message = "the GPU service needs the SETUP_* env: each answer records the setup that made it"
@@ -98,11 +99,32 @@ run "ui_platforms" {
   command = apply
 
   assert {
-    condition     = [for p in output.ui.platforms : p.id] == ["vertex", "runpod"] && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
-    error_message = "the STT tab gets a platform picker; both platforms retry a 429"
+    condition     = [for p in output.ui.platforms : p.id] == ["modal", "vertex", "runpod"] && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
+    error_message = "the STT tab gets a platform picker; all platforms retry a 429"
   }
   assert {
-    condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.type == "stt"
+    condition     = output.ui.base_url == "${output.gateway_url}/modal" && output.ui.type == "stt"
     error_message = "the default platform is the first"
+  }
+}
+
+run "modal" {
+  command = apply
+
+  assert {
+    condition     = output.targets.modal.url == "https://ws--stt-a-qwen3-asr-diar.modal.run" && output.targets.modal.post_apply == "modal"
+    error_message = "the Modal web URL of the app; scripts/platforms/modal.py deploys it"
+  }
+  assert {
+    condition     = output.modal.image == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar:${var.image_tag}" && output.modal.command == ["python3", "-m", "speech_engine.main"] && output.modal.workdir == "/srv"
+    error_message = "the own image and its start command"
+  }
+  assert {
+    condition     = output.modal.env.MODEL == "/models/stt-a-qwen3-asr-diar" && output.modal.env.SETUP_PLATFORM == "modal" && output.modal.env.AUDIO_BUCKET == "p-stt-audio" && output.modal.env.GPU_MEMORY_UTILIZATION == "0.5"
+    error_message = "the container contract and the spec env"
+  }
+  assert {
+    condition     = output.modal.volume == "stt-a-weights" && keys(output.modal.hf_repos) == ["aligner", "asr", "pyannote"] && output.modal.gpus == ["L4", "A10"]
+    error_message = "the weights Volume and its 3 folders"
   }
 }

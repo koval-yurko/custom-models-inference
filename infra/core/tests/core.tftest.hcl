@@ -12,6 +12,7 @@ variables {
   billing_account      = "000000-000000-000000"
   hf_token             = "test"
   runpod_api_key       = "test"
+  modal_api_key        = "test"
   runpod_s3_access_key = "test"
   runpod_s3_secret_key = "test"
   slack_bot_token      = "test"
@@ -177,6 +178,15 @@ run "runpod_key_secret" {
   assert {
     condition     = google_secret_manager_secret_version.runpod_api_key.secret_data_wo_version == "1"
     error_message = "the key is write-only (not in state)"
+  }
+}
+
+run "modal_key_secret" {
+  command = plan
+
+  assert {
+    condition     = google_secret_manager_secret.modal_api_key.secret_id == "modal-api-key" && google_secret_manager_secret_version.modal_api_key.secret_data_wo_version == "1"
+    error_message = "the CORS proxies read the write-only secret modal-api-key"
   }
 }
 

@@ -18,6 +18,11 @@ output "vertex" {
   value = module.model.vertex
 }
 
+# scripts/platforms/modal.py reads this output.
+output "modal" {
+  value = module.model.modal
+}
+
 # scripts/deploy.py reads these outputs.
 output "platforms" {
   description = "Platform ids in order. The first one is the default."
@@ -82,8 +87,8 @@ output "ui" {
     features = {
       max_mb = 20 # larger files go through /v1beta/uploads
     }
-    # 1 entry per platform: { id, label, base_url, cold_start }. Both use retry-429: Vertex AI answers 429 at 0
-    # replicas; the proxy answers 429 when Runpod sends no answer in 280 s (a worker is starting).
+    # 1 entry per platform: { id, label, base_url, cold_start }. All use retry-429: Vertex AI answers 429 at 0
+    # replicas; the proxy answers 429 when Runpod or Modal sends no answer in 280 s (a container is starting).
     platforms = module.model.ui_platforms
   }
 }

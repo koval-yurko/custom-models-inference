@@ -6,9 +6,11 @@
 # A Runpod answer "no workers available" becomes 429 with Retry-After: 30 (cold_answer), so the UI retries.
 # Runpod holds a request at 0 workers until a worker is up, longer than the 300 s gateway deadline for a slow
 # cold start. So a non-google target that sends no answer headers in COLD_WAIT seconds also gets 429 (wait_answer).
+# Modal stops a web request after 150 s with a 303 to a result URL (a cold start takes about 160 s): the proxy follows
+# it with a GET (redirect), and the time of all hops counts against COLD_WAIT.
 import http.client, json, os, sys, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -18,7 +20,8 @@ CORS = {
 }
 META = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 _tok = {"value": "", "exp": 0.0}
-KEYS = {"runpod": "RUNPOD_API_KEY"}  # auth -> env var (a Secret Manager secret)
+KEYS = {"runpod": "RUNPOD_API_KEY", "modal": "MODAL_API_KEY"}  # auth -> env var (a Secret Manager secret)
+MAX_HOPS = 10  # Modal allows 20 redirects; 10 x 150 s is far above COLD_WAIT
 _ok = {}  # platform id -> time of its last answer below 500 (in this instance)
 
 
@@ -59,6 +62,16 @@ def token():
 def auth_header(auth, environ, google_token):
     """google: the metadata server token. Else the API key of the platform. A missing key raises KeyError (502)."""
     return f"Bearer {google_token()}" if auth == "google" else f"Bearer {environ[KEYS[auth]]}"
+
+
+def redirect(auth, status, headers, url):
+    """The absolute URL of a Modal 303 (or 302) to follow, else None. Only Modal: other platforms keep their answer."""
+    loc = next((v for k, v in headers if k.lower() == "location"), None)
+    return urljoin(url, loc) if auth == "modal" and status in (302, 303) and loc else None
+
+
+def path_of(u):
+    return u.path + ("?" + u.query if u.query else "")
 
 
 def cold_answer(auth, status, body):
@@ -104,13 +117,28 @@ class H(BaseHTTPRequestHandler):
         try:
             pid, rest = pick(self.path, TARGETS, DEFAULT)
             t = TARGETS[pid]
-            u = urlsplit(upstream_url(t, rest))
+            url = upstream_url(t, rest)
+            u = urlsplit(url)
             headers = upstream_headers(method, auth_header(t["auth"], os.environ, token))
             cold = t["auth"] != "google"
             conn = http.client.HTTPSConnection(u.netloc, timeout=COLD_WAIT if cold else TIMEOUT)
+            start = time.time()
             try:
-                conn.request(method, u.path + ("?" + u.query if u.query else ""), body, headers)
+                conn.request(method, path_of(u), body, headers)
                 r = conn.getresponse()
+                for _ in range(MAX_HOPS):
+                    url = redirect(t["auth"], r.status, r.getheaders(), url)
+                    if not url:
+                        break
+                    r.read()
+                    conn.close()
+                    left = COLD_WAIT - (time.time() - start)
+                    if left <= 0:
+                        raise TimeoutError("no answer in COLD_WAIT")
+                    u = urlsplit(url)
+                    conn = http.client.HTTPSConnection(u.netloc, timeout=left)
+                    conn.request("GET", path_of(u), None, {"Authorization": headers["Authorization"]})
+                    r = conn.getresponse()
             except TimeoutError:
                 if not cold:
                     raise

@@ -56,6 +56,13 @@ variable "runpod_api_key" {
   sensitive   = true
 }
 
+variable "modal_api_key" {
+  description = "Modal proxy token (wk-<id>.ws-<secret>). Ephemeral: it goes to Secret Manager (modal-api-key) and never into state. The CORS proxy of each model on Modal reads it."
+  type        = string
+  ephemeral   = true
+  sensitive   = true
+}
+
 variable "runpod_s3_access_key" {
   description = "Runpod S3 API access key (user_...). Ephemeral: it goes to Secret Manager (runpod-s3-access-key) and never into state. scripts/runpod-weights.py --cloud reads it."
   type        = string

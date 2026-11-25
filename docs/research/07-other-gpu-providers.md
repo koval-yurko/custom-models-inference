@@ -8,6 +8,8 @@ Update 2026-11-23: Baseten is deferred. The Baseten account answered "Your accou
 
 Update 2026-11-23: Azure is checked in `09-azure.md`. Only Azure Container Apps with serverless GPU (T4 or A100) scales to zero. The user decided not to use Azure for now.
 
+Update 2026-11-24: Modal is checked again for STT-A in `10-modal-stt-a.md` (recommendation: go after a small paid test). Some Modal facts below are older than that document; `10-modal-stt-a.md` wins.
+
 ## Goal
 
 - GCP has capacity problems. Vertex AI in `us-central1` often has no L4 stock ("Machine type temporarily unavailable"). See the pitfall in `04-vertex-ai.md` and the Vertex AI 429 notes in `infra/README.md`.

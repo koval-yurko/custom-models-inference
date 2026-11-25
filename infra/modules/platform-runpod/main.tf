@@ -129,7 +129,7 @@ resource "runpod_serverless_endpoint" "this" {
   # options.workers_max = 0 parks the endpoint: no worker starts, the endpoint and the volumes stay.
   workers_max  = try(var.options.workers_max, try(var.spec.max_replicas, 1))
   idle_timeout = try(var.spec.idle_seconds, 300)
-  flashboot    = "FLASHBOOT"
+  flashboot    = try(var.options.flashboot, "FLASHBOOT") # OFF for a parked endpoint: the account allows 3 with FlashBoot
 
   lifecycle {
     # Runpod copies the template into the endpoint only at create (template_id). A template change (image,

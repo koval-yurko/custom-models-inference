@@ -32,9 +32,11 @@ provider "google-beta" {
 locals {
   # Platforms of this model, in order. The first one is the default for the old paths without a prefix.
   # See infra/README.md, "Module: model (platforms)".
-  platforms = ["vertex", "runpod"]
+  # modal is first (the default for the old paths and the UI): on 2026-11-25 it was the only platform with a free GPU.
+  platforms = ["modal", "vertex", "runpod"]
   # 3 weights-copy runs fill this folder: asr/, aligner/ and pyannote/ (see README.md). Vertex AI copies it from GCS
-  # at start; on Runpod it is on the network volume (scripts/runpod-weights.py copies it there).
+  # at start; on Runpod it is on the network volume (scripts/runpod-weights.py copies it there); on Modal it is on the
+  # Modal Volume (scripts/platforms/modal.py fills it from Hugging Face).
   model_dir = "stt-a-qwen3-asr-diar"
   # Made by infra/core (main.tf). Large audio goes there through the STT API service (stt_api.tf).
   audio_bucket = "${var.project_id}-stt-audio"
@@ -98,6 +100,25 @@ module "model" {
   }
 
   platform_options = {
+    # Modal (infra/modules/platform-modal): scripts/deploy.py runs scripts/platforms/modal.py after apply. 4 cores and
+    # 32 GiB are the default size (ffmpeg decode and Pyannote run on the CPU).
+    modal = {
+      workspace = var.modal_workspace
+      command   = ["python3", "-m", "speech_engine.main"] # the image ENTRYPOINT (Modal does not run it)
+      workdir   = "/srv"
+      volume    = "stt-a-weights"
+      # L4 first (the cheapest 24 GB GPU, $0.80/h), then A10 (a plain A10 or an A10G, $1.10/h) when no L4 is free
+      # (user decision 2026-11-25). With L4 only, a cold start waited 3 to 15 min for an L4; A10 starts came in seconds.
+      gpus = ["L4", "A10"]
+      # Volume folder -> Hugging Face repo: the same HF_REPO values as the weights-copy runs in README.md.
+      hf_repos = {
+        asr      = "Qwen/Qwen3-ASR-1.7B"
+        aligner  = "Qwen/Qwen3-ForcedAligner-0.6B"
+        pyannote = "pyannote/speaker-diarization-community-1"
+      }
+      # The engine posts "ready" and "scaled to 0" itself (SLACK_BOT_TOKEN and SLACK_CHANNEL: a Modal secret from .env).
+      env = { SLACK_TITLE = "STT-A Qwen3 ASR + speakers on Modal" }
+    }
     vertex = {
       # 12 vCPU and 48 GB RAM: ffmpeg decode and Pyannote clustering run on the CPU.
       machine_type          = "g2-standard-12"
@@ -121,6 +142,8 @@ module "model" {
       volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 20, excluded_data_centers = ["EU-RO-1"] }
       # Parked on 2026-11-24: the load balancer did not reach the worker in EU-CZ-1 either. No worker starts.
       workers_max = 0
+      # FlashBoot off: the account allows 3 FlashBoot endpoints, and a replace of this endpoint needs a 4th slot.
+      flashboot = "OFF"
     }
   }
 

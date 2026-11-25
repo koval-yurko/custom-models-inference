@@ -12,7 +12,7 @@ variable "region" {
 variable "image_tag" {
   description = "Tag of the GPU image that services/speech_engine/cloudbuild.yaml pushed to the models repo. Change it for each new build."
   type        = string
-  default     = "0.2.3"
+  default     = "0.2.5"
 }
 
 variable "stt_api_image_tag" {
@@ -25,4 +25,9 @@ variable "gateway_region" {
   description = "API Gateway region. API Gateway is not in every region; it can differ from var.region."
   type        = string
   default     = "europe-west1"
+}
+
+variable "modal_workspace" {
+  description = "Modal workspace name (.env MODAL_PROFILE). The Modal web URL is https://<workspace>--stt-a-qwen3-asr-diar.modal.run."
+  type        = string
 }
