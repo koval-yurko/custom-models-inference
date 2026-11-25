@@ -82,6 +82,7 @@ def create_app(load: Callable[[], Models], audio_bucket: str) -> FastAPI:
     app = FastAPI(title="stt-a-qwen3-asr-diar", lifespan=lifespan)
 
     @app.get("/health")
+    @app.get("/ping")  # the Runpod load balancer probes /ping and ignores HEALTH_CHECK_PATH (seen 2026-11-25)
     async def health(request: Request):
         # Runpod load balancing reads 204 as "initializing" and any other code as unhealthy: it stopped the worker
         # after about 10 min of 503 (worker log 2026-11-24 "container is unhealthy: dead"), before the load ended.
@@ -123,6 +124,6 @@ if __name__ == "__main__":
 
     from speech_engine.models import RealModels
 
-    # Runpod: "::" takes IPv6 and IPv4 on Linux, in case the load balancer probe comes over IPv6.
-    uvicorn.run(create_app(RealModels, os.environ["AUDIO_BUCKET"]), host="::" if SETUP["platform"] == "runpod" else "0.0.0.0",
+    # IPv4 on every platform. Not "::": asyncio sets IPV6_V6ONLY on it, and the Runpod health probe comes over IPv4.
+    uvicorn.run(create_app(RealModels, os.environ["AUDIO_BUCKET"]), host="0.0.0.0",
                 port=port(os.environ), workers=1)

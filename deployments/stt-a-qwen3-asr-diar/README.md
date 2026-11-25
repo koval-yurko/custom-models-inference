@@ -83,7 +83,7 @@ Before the first Modal apply: do [Modal setup (once)](../../infra/README.md#moda
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.6 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.4.0 --region=$GCP_REGION
@@ -115,14 +115,14 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
    ```sh
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/speech_engine \
      --config=deployments/stt-a-qwen3-asr-diar/services/speech_engine/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.2.6 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
      --substitutions=_REGION=$GCP_REGION,_TAG=0.4.0 --region=$GCP_REGION
    gcloud artifacts docker images list $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models --include-tags \
      --filter="package~stt-a-qwen3-asr-diar" --format="table(package,tags)"
    ```
-   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.5` and `stt-a-qwen3-asr-diar-api` with tag `0.4.0`.
+   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.6` and `stt-a-qwen3-asr-diar-api` with tag `0.4.0`.
 2. Undeploy the GPU model. The model upload holds the image tag, so a new image needs a new upload.
    ```sh
    ./scripts/deploy.py undeploy deployments/stt-a-qwen3-asr-diar
@@ -228,7 +228,7 @@ curl -s "$GW/v1beta/files/$ID/versions/$V/score" -H "x-api-key: $KEY" | python3 
 curl -s "$GW/v1beta/scores" -H "x-api-key: $KEY" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['setups'], indent=1))"
 ```
 
-Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.5` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
+Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.6` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
 
 Delete a stored file with all its versions and its reference: `curl -s -X DELETE "$GW/v1beta/files/$ID" -H "x-api-key: $KEY"`. Expected: `200` and `{"deleted": "<id>"}`. The same works for `.../versions/$V` and `.../reference`. There is no undo.
 
@@ -257,8 +257,9 @@ Checks only a real deploy can do (write the results here):
 | 2026-11-25 | 0.2.3 | Modal through the gateway (`/modal/v1beta/files/<id>/transcribe`) | failed first: 5 of 5 container starts ended with SIGSEGV after vLLM was ready, proxy `429` at 281 s and 592 s. Then 1 start (A10G) was good: warm `transcribe` `201` in 9 s, with `diarization: true` `201` in 3 s (`spk_1`, `spk_2`, 37 words) | The cause of the crash is open (not the compile cache). `PYTHONFAULTHANDLER=1` is on. Details: `docs/research/10-modal-stt-a.md`, section "Integration test" |
 | 2026-11-25 | 0.2.5 | Modal through the gateway, cold (`transcribe` with `diarization: true`, retry every 30 s), GPU list L4 then A10 | `201` after about 940 s (3 tries got `429`) | 7 starts: A10 6 crashed (SIGSEGV), L4 1 crashed, A10G good. Answer: `spk_1` 23 and `spk_2` 14 words. Slack "ready" and "scaled to 0" work from 0.2.5 (0.2.3 had no Slack code). After this run: L4 only |
 | 2026-11-25 | 0.2.5 | Modal through the gateway, cold, `gpus = ["L4"]`, after the thread stack fix in `modal_app.py` | `201` after 1058 s (3 tries got `429`) | GPU wait about 15 min (no free L4: call 17:40:38, container start 17:55:48). Container start to `models ready`: 132.9 s, no crash. Scale to 0 (Slack "scaled to 0") 5 min 48 s after the answer. Before the fix, 3 of 3 L4 starts that afternoon ended in SIGSEGV. See `docs/research/10-modal-stt-a.md`, section "Crash cause". |
+| 2026-11-25 | 0.2.6 | Runpod scale up from 0 through the gateway (`/runpod/v1beta/files/<id>/transcribe` with `diarization: true`, retry every 30 s) | `201` after 448 s (1 try got `429` at 285 s) | First Runpod answer. RTX 4090, EU-CZ-1, network volume. GPU wait (THROTTLED) about 5 min (call 23:32:10 UTC, worker start 23:37:27). Container start to `models ready`: 101 s (uvicorn 23:37:48, `models ready` 23:39:29). The probe sent `GET /ping` from 23:37:49 (`204`), then `200`. Warm `transcribe` `201` in 3.8 s. Setup `platform` `runpod`, `gpu` `NVIDIA GeForce RTX 4090`. Cause of the 2026-11-24 failure: the engine listened on `[::]` (IPv6 only, asyncio sets `IPV6_V6ONLY`), the probe comes over IPv4, and the probe asks `/ping`, not `HEALTH_CHECK_PATH`. 0.2.6 listens on `0.0.0.0` and answers `/ping`. |
 
-Runpod: the first cold start that reaches `200` is not measured yet (see the 2026-11-24 row). The proxy answers `429` every 280 s while the worker starts, so count from the first try.
+Runpod: the proxy answers `429` every 280 s while the worker starts, so count from the first try. Most of the Runpod cold start is the wait for a free 24 GB GPU (see the 2026-11-25 row).
 
 Weights copy (from the container start to the first vLLM log line): 89 s with 0.1.2 (1 file at a time), 63 to 67 s with 0.1.3 (`transfer_manager`, 16 threads). The gain is about 25 s. The node start and the image pull take most of the cold start, and the weights copy does not change them. The 0.1.3 log shows `Connection pool is full ... Connection pool size: 10`: 16 threads share 10 connections.
 

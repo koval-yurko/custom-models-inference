@@ -138,9 +138,8 @@ module "model" {
       }
       # The weights: 1 volume per data center (all with the S3 API for scripts/runpod-weights.py). A worker starts only
       # where a volume is, and 24 GB GPUs are often out of stock in 1 data center, so 3 give more chances.
-      # EU-RO-1 is excluded (the volume stays): on 2026-11-24 the load balancer never reached a worker there.
-      volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 20, excluded_data_centers = ["EU-RO-1"] }
-      # Parked on 2026-11-24: the load balancer did not reach the worker in EU-CZ-1 either. No worker starts.
+      volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 20 }
+      # Parked (no worker starts). Set 1 to serve; scale to 0 after idle works then (first answer 2026-11-25, 0.2.6).
       workers_max = 0
       # FlashBoot off: the account allows 3 FlashBoot endpoints, and a replace of this endpoint needs a 4th slot.
       flashboot = "OFF"

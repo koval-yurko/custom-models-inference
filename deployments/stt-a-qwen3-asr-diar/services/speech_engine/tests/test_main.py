@@ -89,6 +89,7 @@ class MainTest(unittest.TestCase):
 
         with mock.patch.dict(main.SETUP, {"platform": "runpod"}), TestClient(main.create_app(load, "B")) as c:
             self.assertEqual(c.get("/health").status_code, 204)
+            self.assertEqual(c.get("/ping").status_code, 204)  # the path the Runpod probe uses
             gate.set()
 
     def test_ready_prints_line(self):

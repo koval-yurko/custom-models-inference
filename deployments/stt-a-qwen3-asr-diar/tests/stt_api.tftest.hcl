@@ -57,7 +57,7 @@ run "stt_api_service" {
     condition = local.stt_api_env == {
       AUDIO_BUCKET = "p-stt-audio"
       SA_EMAIL     = module.stt_api.service_account_email
-      IMAGE_TAG    = "0.2.5"
+      IMAGE_TAG    = "0.2.6"
       TARGET       = module.model.proxy_url
       PLATFORMS    = "modal,vertex,runpod"
     }

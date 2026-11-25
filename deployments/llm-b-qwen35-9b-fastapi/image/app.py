@@ -145,6 +145,7 @@ def log_health(request: Request, code: int):
 
 
 @app.get("/health")
+@app.get("/ping")  # the Runpod load balancer probes /ping and ignores HEALTH_CHECK_PATH (seen 2026-11-25)
 async def health(request: Request):
     if engine is None:
         # Runpod load balancing reads 204 as "initializing" and any other code as unhealthy: it stopped the worker
@@ -189,6 +190,5 @@ async def extract(body: ExtractIn):
 if __name__ == "__main__":
     # PORT (container contract, the Runpod adapter sets it), else AIP_HTTP_PORT (Vertex AI), else 8080.
     port = int(os.environ.get("PORT") or os.environ.get("AIP_HTTP_PORT") or "8080")
-    # Runpod: "::" takes IPv6 and IPv4 on Linux, in case the load balancer probe comes over IPv6.
-    host = "::" if os.environ.get("SETUP_PLATFORM") == "runpod" else "0.0.0.0"
-    uvicorn.run(app, host=host, port=port, workers=1)
+    # IPv4 on every platform. Not "::": asyncio sets IPV6_V6ONLY on it, and the Runpod health probe comes over IPv4.
+    uvicorn.run(app, host="0.0.0.0", port=port, workers=1)
