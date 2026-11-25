@@ -18,7 +18,7 @@ variable "image_tag" {
 variable "stt_api_image_tag" {
   description = "Tag of the STT API service image that services/stt_api/cloudbuild.yaml pushed to the models repo. Change it for each new build."
   type        = string
-  default     = "0.3.0"
+  default     = "0.4.0"
 }
 
 variable "gateway_region" {

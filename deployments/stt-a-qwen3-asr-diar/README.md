@@ -12,7 +12,7 @@ Speech to text with a speaker for each word, behind the Gemini 3.5 Transcribe co
 - Public API Gateway `stt-a-qwen3-asr-diar` checks `x-api-key`. Each path is there 4 times: the old path (the default platform, Modal), `/modal/...`, `/vertex/...` and `/runpod/...`.
   - `POST /v1beta/interactions` goes to the CORS proxy `stt-a-qwen3-asr-diar-proxy`, then to the Modal web endpoint, Vertex AI `:rawPredict` or the Runpod endpoint. Deadline 300 s. A cold Modal call takes about 160 s: Modal answers 303 at 150 s, and the proxy follows it.
   - `POST /v1beta/uploads` and `/v1beta/files...` go to the CPU STT API service `stt-a-qwen3-asr-diar-api` (`services/stt_api/`, own small image). It gives signed `PUT` URLs (15 minutes, up to 500 MB) for `gs://<project_id>-stt-audio/files/<id>/audio`, lists the files, and keeps the transcript history. "Transcribe again" calls the GPU through the CORS proxy (`<proxy>/<platform>/v1beta/interactions`; the path prefix picks the platform) with a signed `GET` URL of the audio, and saves the answer as a new version. The files are the same on both platforms.
-- Files and versions are kept forever (no automatic delete). Only runs of `POST /v1beta/files/<id>/transcribe` are saved. A direct `/v1beta/interactions` call is not saved, so test scripts use `transcribe`.
+- Files and versions are kept until a user deletes them (no automatic delete). The UI and `DELETE /v1beta/files/<id>`, `.../versions/<version_id>` and `.../reference` delete them. Only runs of `POST /v1beta/files/<id>/transcribe` are saved. A direct `/v1beta/interactions` call is not saved, so test scripts use `transcribe`.
 - The test UI has a tab for it (type `stt`): the files list, the versions of a file, "Transcribe again" with a label, and 2 versions side by side.
 - Evaluation: see [Evaluation](#evaluation). A reference transcript per file gives each version a WER, cpWER and DER score, and the UI shows the mean per setup.
 
@@ -86,7 +86,7 @@ Before the first Modal apply: do [Modal setup (once)](../../infra/README.md#moda
      --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.4.0 --region=$GCP_REGION
    ```
 4. Apply. Step 1 (`hcp-sync.py`) made the Runpod secrets `slack_bot_token` and `slack_channel` (see [Runpod (own images: Slack from the container)](../../infra/README.md#runpod-own-images-slack-from-the-container)). Without them, the worker sends no Slack message. The apply makes the Vertex AI endpoint, the Runpod volume, template and endpoint, the gateway, the CORS proxy, the STT API service and the Slack alerts.
    ```sh
@@ -118,11 +118,11 @@ Use these steps after a code change. Run the commands from the repo root. Raise 
      --substitutions=_REGION=$GCP_REGION,_TAG=0.2.5 --region=$GCP_REGION
    gcloud builds submit deployments/stt-a-qwen3-asr-diar/services/stt_api \
      --config=deployments/stt-a-qwen3-asr-diar/services/stt_api/cloudbuild.yaml \
-     --substitutions=_REGION=$GCP_REGION,_TAG=0.3.0 --region=$GCP_REGION
+     --substitutions=_REGION=$GCP_REGION,_TAG=0.4.0 --region=$GCP_REGION
    gcloud artifacts docker images list $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/models --include-tags \
      --filter="package~stt-a-qwen3-asr-diar" --format="table(package,tags)"
    ```
-   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.5` and `stt-a-qwen3-asr-diar-api` with tag `0.3.0`.
+   Expected: `stt-a-qwen3-asr-diar` with tag `0.2.5` and `stt-a-qwen3-asr-diar-api` with tag `0.4.0`.
 2. Undeploy the GPU model. The model upload holds the image tag, so a new image needs a new upload.
    ```sh
    ./scripts/deploy.py undeploy deployments/stt-a-qwen3-asr-diar
@@ -230,7 +230,7 @@ curl -s "$GW/v1beta/scores" -H "x-api-key: $KEY" | python3 -c "import json,sys; 
 
 Expected: `200` for the `PUT`. The newest version has a `setup` with `image_tag` `0.2.5` and `platform`. The score has `wer`, `cpwer`, `der`, `mapping` (`spk_1` to `Alice`) and `speed`. `scores` has 1 row per setup.
 
-Delete a stored file by hand (there is no delete route): `gcloud storage rm -r gs://$GCP_PROJECT_ID-stt-audio/files/<id>/`.
+Delete a stored file with all its versions and its reference: `curl -s -X DELETE "$GW/v1beta/files/$ID" -H "x-api-key: $KEY"`. Expected: `200` and `{"deleted": "<id>"}`. The same works for `.../versions/$V` and `.../reference`. There is no undo.
 
 Verified on 2026-11-21 (image 0.1.2): through the gateway, `transcribe` on a stored 2-speaker file returned HTTP 201 with the exact text, 37 `word_info` items, and the turns `spk_1`, `spk_2`, `spk_1` in the right places. The version was saved, and the live test UI showed it, made a second version with a label, and showed both side by side. `models ready` is in the Vertex AI logs. The 3 models fit on the L4 with `GPU_MEMORY_UTILIZATION=0.5` and `MAX_MODEL_LEN=16384`. The aligner words have no punctuation (`output_text` keeps it).
 

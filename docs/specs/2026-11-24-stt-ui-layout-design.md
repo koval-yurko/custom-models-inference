@@ -2,7 +2,7 @@
 
 Date: 2026-11-24. Status: layout approved by the user in chat (3 rounds of mockups). This document waits for approval.
 
-Changes after use (user, 2026-11-24): "Apply to all versions" is removed. The reference Edit tab is replaced by a full-width editor page (`.../ref/edit`, `RefEditor.tsx`): 1 card per turn, a speaker bar, add, merge and delete, and a raw text mode. The reference row opens Evaluation by default. Word-level comparison is on the compare page (`docs/specs/2026-11-24-stt-compare-design.md`). The sections below keep the first design.
+Changes after use (user, 2026-11-24): "Apply to all versions" is removed. The reference Edit tab is replaced by a full-width editor page (`.../ref/edit`, `RefEditor.tsx`): 1 card per turn, a speaker bar, add, merge and delete, and a raw text mode. The reference row opens Evaluation by default. Word-level comparison is on the compare page (`docs/specs/2026-11-24-stt-compare-design.md`). Later (2026-11-25): each file card, version card and the reference row has a 🗑 button. A confirm box opens first. It calls the new routes `DELETE /v1beta/files/<id>`, `.../versions/<version_id>` and `.../reference`. The sections below keep the first design.
 
 ## Intent
 
@@ -143,7 +143,7 @@ Below 1000 px the 3 columns stack: files, then history, then the work area. The 
 
 - No change to the STT API, the scoring code or the reference format.
 - No word diff between versions or against the reference.
-- No delete of a file, a version or a reference (the API has no route for it).
+- No delete of a file, a version or a reference (the API has no route for it). Changed on 2026-11-25: see the note at the top.
 - No file length in the cards (the API does not return it).
 - No change to the TTS and LLM tabs.
 

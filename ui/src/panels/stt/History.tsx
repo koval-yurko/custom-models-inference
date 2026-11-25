@@ -16,12 +16,13 @@ interface Props {
   onTick: (id: string) => void;
   onRun: () => void;
   onStop: () => void;
+  onDelete: (row: string) => void; // "ref" or a version id
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /** Column 2: the pinned reference row, the New run box, the run state and 1 card per version (newest first). */
-export default function History({ versions, scores, reference, row, ticked, run, newRun, onNewRun, onSelect, onTick, onRun, onStop }: Props) {
+export default function History({ versions, scores, reference, row, ticked, run, newRun, onNewRun, onSelect, onTick, onRun, onStop, onDelete }: Props) {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -32,6 +33,7 @@ export default function History({ versions, scores, reference, row, ticked, run,
   const sum = reference && refSummary(reference);
   return (
     <div className="stt-history">
+      <div className="stt-del-wrap">
       <button className={`stt-card stt-ref${reference ? "" : " ghost"}${row === "ref" ? " selected" : ""}`} onClick={() => onSelect("ref")}>
         {sum ? (
           <>
@@ -46,6 +48,12 @@ export default function History({ versions, scores, reference, row, ticked, run,
           </span>
         )}
       </button>
+      {reference && (
+        <button className="stt-del" aria-label="Delete the reference" title="Delete the reference" onClick={() => onDelete("ref")}>
+          🗑
+        </button>
+      )}
+      </div>
       <div className="stt-newrun">
         <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
           <b>＋ New run</b> {open ? "▾" : "▸"}
@@ -98,6 +106,9 @@ export default function History({ versions, scores, reference, row, ticked, run,
                 <b>{vtime(v.id)}</b>
               </button>{" "}
               {s && <span className={`chip ${scoreTone(s.cpwer)}`}>cpWER {pct(s.cpwer)}</span>}
+              <button className="stt-del" aria-label={`Delete version ${vtime(v.id)}`} title="Delete this version" onClick={(e) => (e.stopPropagation(), onDelete(v.id))}>
+                🗑
+              </button>
             </div>
             <span className="muted" title={v.setup ? JSON.stringify(v.setup) : "a version made before the setup record"}>
               {v.label || "no label"} · {setupShort(v.setup)} · {v.speakers} spk · {v.run_seconds} s

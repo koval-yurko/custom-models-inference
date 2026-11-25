@@ -1,4 +1,4 @@
-"""The bucket layout. gs://<project_id>-stt-audio/files/<id>/
+"""The bucket layout. gs://<project_id>-stt-audio/files/<id>/ (the delete routes remove a file, a version or a reference)
   audio                              the uploaded audio
   meta.json                          name, mime type, size, created (also as object metadata, for the file list)
   versions/<version_id>.json         1 transcript version (never replaced)

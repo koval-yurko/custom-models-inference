@@ -10,10 +10,11 @@ interface Props {
   onAll: () => void;
   onUpload: (f: File) => void;
   onRefresh: () => void;
+  onDelete: (f: FileRow) => void;
 }
 
 /** Column 1: the All files row, the drop zone, a search field and 1 card per file. */
-export default function Files({ files, selected, best, busy, onOpen, onAll, onUpload, onRefresh }: Props) {
+export default function Files({ files, selected, best, busy, onOpen, onAll, onUpload, onRefresh, onDelete }: Props) {
   const [q, setQ] = useState("");
   const [over, setOver] = useState(false);
   const [open, setOpen] = useState(false); // narrow screens: the full list shows only after "Change file"
@@ -44,7 +45,8 @@ export default function Files({ files, selected, best, busy, onOpen, onAll, onUp
       <input className="stt-search" aria-label="Search files" placeholder="Search files" value={q} onChange={(e) => setQ(e.target.value)} />
       {files.length === 0 && <p className="muted">No files yet.</p>}
       {shown.map((f) => (
-        <button key={f.id} className={`stt-card${f.id === selected ? " selected" : ""}`} onClick={() => (setOpen(false), onOpen(f.id))}>
+        <div key={f.id} className="stt-del-wrap">
+        <button className={`stt-card${f.id === selected ? " selected" : ""}`} onClick={() => (setOpen(false), onOpen(f.id))}>
           <b>{f.name}</b>
           <span className="muted">
             {(f.size_bytes / 1e6).toFixed(1)} MB · {f.versions} version{f.versions === 1 ? "" : "s"} · {when(f.created)}
@@ -54,6 +56,10 @@ export default function Files({ files, selected, best, busy, onOpen, onAll, onUp
             {best[f.id] !== undefined && <span className="chip">best {pct(best[f.id])}</span>}
           </span>
         </button>
+        <button className="stt-del" aria-label={`Delete file ${f.name}`} title="Delete this file" onClick={() => onDelete(f)}>
+          🗑
+        </button>
+        </div>
       ))}
     </div>
   );

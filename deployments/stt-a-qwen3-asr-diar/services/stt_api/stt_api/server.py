@@ -10,7 +10,7 @@ from stt_api.routes import error, route
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "content-type, x-api-key, authorization",
     "Access-Control-Max-Age": "600",
 }
@@ -59,6 +59,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         self.handle_call("PUT")
+
+    def do_DELETE(self):
+        self.handle_call("DELETE")
 
 
 def main():

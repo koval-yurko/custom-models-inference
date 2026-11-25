@@ -50,6 +50,19 @@ class GcpTest(unittest.TestCase):
         self.assertEqual([i["name"] for i in items], ["files/a", "files/b"])
         self.assertIn("pageToken=t2", urls[1])
 
+    def test_gcs_delete_ignores_404(self):
+        reqs = []
+
+        def fake_open(req, timeout=None):
+            reqs.append(req)
+            raise gcp.urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+
+        with mock.patch.object(gcp.urllib.request, "urlopen", fake_open), mock.patch.object(gcp, "token",
+                                                                                                return_value="t"):
+            gcp.GcsStore("B").delete("files/a/x.json")
+        self.assertEqual((reqs[0].get_method(), reqs[0].full_url),
+                         ("DELETE", "https://storage.googleapis.com/storage/v1/b/B/o/files%2Fa%2Fx.json"))
+
 
 class GpuPostTest(unittest.TestCase):
     def test_id_token_for_the_proxy(self):

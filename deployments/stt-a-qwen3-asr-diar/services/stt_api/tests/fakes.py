@@ -35,6 +35,10 @@ class FakeStore:
         self.calls.append(("write", name, replace))
         self.put(name, data, metadata)
 
+    def delete(self, name):
+        self.calls.append(("delete", name))
+        self.objects.pop(name, None)
+
 
 class FakeGpu:
     def __init__(self, status=200, body=GEMINI):

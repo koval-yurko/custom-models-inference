@@ -34,7 +34,7 @@ run "stt_api_service" {
   command = apply
 
   assert {
-    condition     = local.stt_api_image == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar-api:0.3.0"
+    condition     = local.stt_api_image == "us-central1-docker.pkg.dev/p/models/stt-a-qwen3-asr-diar-api:0.4.0"
     error_message = "the STT API service runs its own image from the models repo (services/stt_api/cloudbuild.yaml)"
   }
   assert {
@@ -72,7 +72,7 @@ run "stt_api_service" {
     error_message = "the STT API SA must list and read the audio bucket"
   }
   assert {
-    condition     = google_storage_bucket_iam_member.stt_api_names.role == "roles/storage.objectUser" && google_storage_bucket_iam_member.stt_api_names.condition[0].expression == "resource.name.startsWith(\"projects/_/buckets/p-stt-audio/objects/files/\") && (resource.name.endsWith(\".names.json\") || resource.name.endsWith(\"/reference.json\"))"
-    error_message = "the STT API SA may replace only the speaker names files (*.names.json) and the references"
+    condition     = google_storage_bucket_iam_member.stt_api_names.role == "roles/storage.objectUser" && google_storage_bucket_iam_member.stt_api_names.condition[0].expression == "resource.name.startsWith(\"projects/_/buckets/p-stt-audio/objects/files/\")"
+    error_message = "the STT API SA may replace and delete only the objects under files/"
   }
 }

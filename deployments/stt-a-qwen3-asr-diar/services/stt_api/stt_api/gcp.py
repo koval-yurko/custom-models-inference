@@ -59,7 +59,7 @@ def _auth(extra=None):
 
 class GcsStore:
     """GCS JSON API. write never replaces an object (ifGenerationMatch=0), unless replace=True (only *.names.json and
-    reference.json: the IAM grant to replace is limited to these names, see stt_api.tf)."""
+    reference.json). delete removes 1 object (the delete routes of the UI; the IAM grant is in stt_api.tf)."""
 
     def __init__(self, bucket):
         self.api = f"https://{HOST}/storage/v1/b/{bucket}/o"
@@ -84,6 +84,15 @@ class GcsStore:
             if e.code == 404:
                 raise KeyError(name) from e
             raise
+
+    def delete(self, name):
+        """Delete 1 object. A missing object is not an error (a repeated delete)."""
+        try:
+            r = urllib.request.Request(f"{self.api}/{quote(name, safe='')}", headers=_auth(), method="DELETE")
+            urllib.request.urlopen(r, timeout=30).read()
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
 
     def write(self, name, data, content_type, metadata=None, replace=False):
         b = "stt-files-boundary"

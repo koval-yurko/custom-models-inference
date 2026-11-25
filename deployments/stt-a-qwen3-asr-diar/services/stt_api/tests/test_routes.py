@@ -167,4 +167,37 @@ class RoutesTest(unittest.TestCase):
 
     def test_unknown_route(self):
         self.assertEqual(call("GET", "/v1beta/nope")[0], 404)
-        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}")[0], 404)
+        self.assertEqual(call("DELETE", "/v1beta/files")[0], 404)
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/audio")[0], 404)
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/versions/{V1}/names")[0], 404)
+
+    def test_delete_version(self):
+        store = FakeStore()
+        stored_file(store, versions=(V1, V2))
+        store.put(f"files/{FID}/versions/{V1}.names.json", {"spk_1": "Ann"})
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/versions/{V1}", None, store), (200, {"deleted": V1}))
+        self.assertEqual([n for n in store.objects if "/versions/" in n], [f"files/{FID}/versions/{V2}.json"])
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/versions/{V1}", None, store)[0], 404)
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/versions/x", None, store)[0], 400)
+
+    def test_delete_reference(self):
+        store = FakeStore()
+        stored_file(store)
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/reference", None, store)[0], 404)
+        store.put(f"files/{FID}/reference.json", {"language": "en", "turns": []})
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}/reference", None, store), (200, {"deleted": "reference"}))
+        self.assertNotIn(f"files/{FID}/reference.json", store.objects)
+        self.assertIn(f"files/{FID}/audio", store.objects)
+
+    def test_delete_file(self):
+        store = FakeStore()
+        stored_file(store, versions=(V1, V2))
+        stored_file(store, FID2, versions=(V1,))
+        store.put(f"files/{FID}/reference.json", {"language": "en", "turns": []})
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}", None, store), (200, {"deleted": FID}))
+        self.assertFalse([n for n in store.objects if n.startswith(f"files/{FID}/")])
+        self.assertTrue([n for n in store.objects if n.startswith(f"files/{FID2}/")], "other files stay")
+        deletes = [c[1] for c in store.calls if c[0] == "delete"]
+        self.assertEqual(deletes[0], f"files/{FID}/audio", "audio first: a half-deleted file is not in the list")
+        self.assertEqual(call("DELETE", f"/v1beta/files/{FID}", None, store)[0], 404)
+        self.assertEqual(call("DELETE", "/v1beta/files/not-a-uuid", None, store)[0], 400)

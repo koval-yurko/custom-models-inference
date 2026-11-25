@@ -100,10 +100,17 @@ http.createServer(async (req, res) => {
     return json(200, { rows, setups: py("summarize", rows).ok });
   }
   const m = req.url.match(/^\/v1beta\/files(?:\/([^/]+)(?:\/(transcribe|versions|audio|reference)(?:\/([^/]+)(\/names|\/score)?)?)?)?$/);
-  if (m) { // STT-A STT API service: list, 1 file, 1 version, names, audio URL, transcribe again (kept in memory)
+  if (m) { // STT-A STT API service: list, 1 file, 1 version, names, audio URL, transcribe again, delete (kept in memory)
     const [, id, op, vid, names] = m, f = files.get(id);
     if (!id) return json(200, { files: [...files.values()].filter((x) => x.audio).reverse().map(({ audio, versions, reference, ...x }) => ({ ...x, versions: versions.length, latest: versions.at(-1)?.id ?? null, reference: !!reference })) });
     if (!f || !f.audio) return json(404, { error: { code: 404, message: "file not found", status: "NOT_FOUND" } });
+    if (req.method === "DELETE" && !op) return files.delete(id), json(200, { deleted: id });
+    if (req.method === "DELETE" && op === "reference") return f.reference ? (delete f.reference, json(200, { deleted: "reference" })) : json(404, { error: { code: 404, message: "this file has no reference", status: "NOT_FOUND" } });
+    if (req.method === "DELETE" && op === "versions" && vid && !names) {
+      const n = f.versions.length;
+      f.versions = f.versions.filter((x) => x.id !== vid);
+      return n === f.versions.length ? json(404, { error: { code: 404, message: "version not found", status: "NOT_FOUND" } }) : json(200, { deleted: vid });
+    }
     if (op === "reference" && req.method === "GET") return f.reference ? json(200, f.reference) : json(404, { error: { code: 404, message: "this file has no reference", status: "NOT_FOUND" } });
     if (op === "reference" && req.method === "PUT") {
       const r = py("check_reference", j);

@@ -39,7 +39,7 @@ resource "google_cloud_run_v2_service_iam_member" "stt_api_gateway" {
   member   = "serviceAccount:${module.model.gateway_service_account_email}"
 }
 
-# Create and read: the SA cannot replace or delete audio or versions (names: see stt_api_names).
+# Create and read. Replace and delete: see stt_api_names.
 resource "google_storage_bucket_iam_member" "stt_api_create" {
   bucket = local.audio_bucket
   role   = "roles/storage.objectCreator"
@@ -52,17 +52,17 @@ resource "google_storage_bucket_iam_member" "stt_api_read" {
   member = "serviceAccount:${module.stt_api.service_account_email}"
 }
 
-# Speaker names (files/<id>/versions/<version_id>.names.json) and the reference (files/<id>/reference.json) change,
-# so the SA may replace these objects only.
+# Speaker names and the reference change, and the UI deletes files, versions and references, so the SA may replace
+# and delete objects under files/. The code replaces only *.names.json and reference.json (stt_api/gcp.py write).
 # The condition needs uniform bucket-level access (infra/core main.tf sets it).
 resource "google_storage_bucket_iam_member" "stt_api_names" {
   bucket = local.audio_bucket
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${module.stt_api.service_account_email}"
   condition {
-    title       = "names-and-reference-only"
-    description = "Replace only the speaker names files and the references"
-    expression  = "resource.name.startsWith(\"projects/_/buckets/${local.audio_bucket}/objects/files/\") && (resource.name.endsWith(\".names.json\") || resource.name.endsWith(\"/reference.json\"))"
+    title       = "files-only"
+    description = "Replace and delete only the objects under files/"
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${local.audio_bucket}/objects/files/\")"
   }
 }
 

@@ -4,6 +4,7 @@ import { Curl, Status, Timings, type Timing } from "../../components";
 import { parseHash, sttHash, type ModelConfig } from "../../config";
 import AllFiles from "./AllFiles";
 import Compare from "./Compare";
+import Confirm, { type Ask } from "./Confirm";
 import Evaluation from "./Evaluation";
 import Files from "./Files";
 import History, { type NewRun } from "./History";
@@ -12,7 +13,7 @@ import RefEditor from "./RefEditor";
 import Speakers from "./Speakers";
 import Transcript from "./Transcript";
 import {
-  JSON_HDR, TIMEOUT_MSG, bestCpwer, hasUnsavedEdits, resolveView, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, mimeOf, parseReference, refSeconds, refTime, renameRefSpeaker, when, words,
+  JSON_HDR, TIMEOUT_MSG, vtime, bestCpwer, hasUnsavedEdits, resolveView, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, mimeOf, parseReference, refSeconds, refTime, renameRefSpeaker, when, words,
   type FileRow, type Names, type RefTurn, type Reference, type Score, type SetupRow, type Summary, type Version, type View,
 } from "./lib";
 
@@ -53,6 +54,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
   const [curl, setCurl] = useState("");
+  const [ask, setAsk] = useState<Ask>(); // the open delete confirm box
   const abort = useRef<AbortController>(null);
   // 1 <audio> for the file. The signed GET URL lasts 15 minutes, so it is fetched again after 10 minutes.
   const audio = useRef<HTMLAudioElement>(null);
@@ -300,6 +302,56 @@ export default function Stt({ model }: { model: ModelConfig }) {
       }
     });
 
+  // --- delete (each after a confirm box) ---
+  const remove = async (path: string) => {
+    const res = await call(model, path, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new Error(await errorText(res)); // 404: it is already gone
+    void loadFiles();
+    void loadSetups();
+  };
+  const deleteFile = (f: FileRow) =>
+    setAsk({
+      title: "Delete this file?",
+      text: `"${f.name}": the audio, ${f.versions} version${f.versions === 1 ? "" : "s"}${f.reference ? " and the reference" : ""}.`,
+      action: "Delete file",
+      run: async () => {
+        await remove(`/v1beta/files/${f.id}`);
+        if (hRef.current.file === f.id) go({ file: undefined, row: undefined, view: undefined, v: undefined });
+      },
+    });
+  const deleteRow = (r: string) => {
+    const fid = fileId;
+    if (!fid) return;
+    if (r === "ref")
+      return setAsk({
+        title: "Delete the reference?",
+        text: "The reference of this file. The versions stay, but they get no scores.",
+        action: "Delete reference",
+        run: async () => {
+          await remove(`/v1beta/files/${fid}/reference`);
+          if (current.current !== fid) return;
+          if (hRef.current.row === "ref") go({ row: working, view: undefined, v: undefined });
+          void loadDetail(fid, true);
+        },
+      });
+    const sum = versions.find((v) => v.id === r);
+    setAsk({
+      title: "Delete this version?",
+      text: `Version ${vtime(r)} (${sum?.label || "no label"}): its transcript and its speaker names.`,
+      action: "Delete version",
+      run: async () => {
+        await remove(`/v1beta/files/${fid}/versions/${r}`);
+        if (current.current !== fid) return;
+        setTicked((t) => t.filter((x) => x !== r));
+        setFull(({ [r]: _, ...rest }) => rest); // eslint-disable-line @typescript-eslint/no-unused-vars
+        const c = hRef.current;
+        if (c.row === r) go({ row: undefined, view: undefined, v: undefined });
+        else if (c.v === r) go({ v: undefined });
+        void loadDetail(fid);
+      },
+    });
+  };
+
   // --- runs ---
   const transcribe = async (id: string, signal: AbortSignal, timing: Timing) => {
     const body = { ...(newRun.lang ? { language_codes: [newRun.lang] } : {}), diarization: newRun.diarize, ...(newRun.label ? { label: newRun.label } : {}) };
@@ -379,7 +431,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
 
   return (
     <section className={`stt${all ? " stt-all-view" : ""}${wide ? " stt-compare-view" : ""}`}>
-      {!wide && <Files files={files} selected={h.file} best={best} busy={!!busy} onOpen={open} onAll={() => go({ file: "all", row: undefined, view: undefined, v: undefined }, true)} onUpload={upload} onRefresh={() => void (setError(undefined), loadFiles(), loadSetups(), fileId && loadDetail(fileId))} />}
+      {!wide && <Files files={files} selected={h.file} best={best} busy={!!busy} onOpen={open} onAll={() => go({ file: "all", row: undefined, view: undefined, v: undefined }, true)} onUpload={upload} onDelete={deleteFile} onRefresh={() => void (setError(undefined), loadFiles(), loadSetups(), fileId && loadDetail(fileId))} />}
       {!all && !wide && (
         <div className="stt-col">
           {detail ? (
@@ -396,6 +448,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
               onTick={tickVersion}
               onRun={again}
               onStop={() => abort.current?.abort()}
+              onDelete={deleteRow}
             />
           ) : (
             <p className="muted">{fileId ? "Loading…" : "Pick a file."}</p>
@@ -515,6 +568,7 @@ export default function Stt({ model }: { model: ModelConfig }) {
           </>
         )}
       </div>
+      {ask && <Confirm ask={ask} onClose={() => setAsk(undefined)} />}
       <audio
         ref={audio}
         hidden
