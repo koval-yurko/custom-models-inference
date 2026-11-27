@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(direnv exec * terraform apply *)",
+      "Bash(direnv exec * terraform destroy *)",
+      "Bash(terraform -chdir=* apply *)",
+      "Bash(terraform -chdir=* destroy *)"
+    ]
+  },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
     "pstack@cursor-plugins": true

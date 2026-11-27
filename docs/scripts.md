@@ -5,7 +5,7 @@ All scripts are Python 3 (standard library only) in `scripts/`. They load the re
 | Script | Does | Changes the cloud? |
 |---|---|---|
 | `check.py` | `fmt`, `validate`, `terraform test` and `tflint` in every root, plus the Python unit tests of the roots and of `scripts/`. Each deployment must call `scale-alerts`. No credentials. | No |
-| `preflight.py` | Reads the real project: stale shell, HCP region variable, APIs, bucket and repo region. Flag `--weights <folder>`: weights exist. Flag `--l4`: L4 quota. | No (read-only) |
+| `preflight.py` | Reads the real project: stale shell, HCP region variable, APIs, bucket and repo region. Runpod balance (prepaid: FAIL below $0.01, because no worker starts then; WARN below $1). Flag `--weights <folder>`: weights exist. Flag `--l4`: L4 quota. | No (read-only) |
 | `hcp-sync.py` | Copies `.env` values to the HCP workspaces. Makes a missing workspace. Gives every workspace `RUNPOD_API_KEY` as a sensitive env var. Flag `--dry-run`. | HCP only |
 | `vertex.py deploy\|undeploy <dir>` | For a deployment without the `model` module (LLM-B). First fills the image cache of the `dockerhub` proxy repo (one manifest request, must give 200). Then it uploads and deploys the model on Vertex AI, or removes it. Refreshes the token on a 401. At the end it runs `ui-deploy.py --config-only`. | Yes (GPU cost) |
 | `deploy.py deploy\|undeploy\|status <dir> [--platform <id>]` | The post-apply step of each platform of a deployment on the `model` module (LLM-A, STT-A). For `vertex` it runs the same code as `vertex.py`. `status` shows deployed or not deployed per platform. | Yes (GPU cost) |

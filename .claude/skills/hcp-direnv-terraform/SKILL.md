@@ -14,7 +14,7 @@ description: Run Terraform on HCP Terraform with direnv-loaded .env, gcloud isol
 
 ## Agent shells
 
-An agent shell has no direnv hook, and shell state does not persist between commands. Prefix each command: `direnv exec . terraform plan`, `direnv exec . gcloud ...`. `direnv exec` finds `.envrc` in a parent folder. The agent does not run apply, destroy or real GCP calls unless the repo says so. Read the repo `CLAUDE.md` first.
+An agent shell has no direnv hook, and shell state does not persist between commands. Prefix each command: `direnv exec . terraform plan`, `direnv exec . gcloud ...`. `direnv exec` finds `.envrc` in a parent folder. The agent runs apply, destroy and real GCP calls only as the repo `CLAUDE.md` says. Read it first.
 
 ## Facts
 

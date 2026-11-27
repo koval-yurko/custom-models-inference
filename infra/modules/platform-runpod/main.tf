@@ -44,6 +44,10 @@ locals {
     try(var.options.env, {}),
   )
 
+  template_hash = sha1(jsonencode([local.image, local.registry_id, local.args, local.env, local.port, try(var.options.disk_gb, 60)]))
+
+  serve = try(var.options.serve, true)
+
   registry_name = try(var.options.registry, "gcp-models")
   registry_id   = local.own != null ? module.registry[0].id : null
 }
@@ -65,8 +69,15 @@ resource "runpod_network_volume" "this" {
   type        = try(local.volume.type, "STANDARD")
 }
 
+# The content of the template. A change makes a new template and endpoint with a new name: Runpod refuses 2
+# endpoints with the same template name, and the endpoint replace makes the new endpoint before it deletes the old one (create_before_destroy
+# comes from the gateway API config through the proxy). So each endpoint gets its own template.
+resource "terraform_data" "template" {
+  input = local.template_hash
+}
+
 resource "runpod_template" "this" {
-  name       = local.name
+  name       = "${local.name}-${substr(local.template_hash, 0, 8)}"
   image      = local.image
   registry   = local.registry_id
   args       = join(" ", local.args) # Runpod takes 1 string
@@ -76,6 +87,7 @@ resource "runpod_template" "this" {
   serverless = true
 
   lifecycle {
+    replace_triggered_by = [terraform_data.template]
     precondition {
       condition     = local.weights == null || local.volume != null || local.revision != null
       error_message = "spec.weights.revision (a commit sha) is required on Runpod without a volume, so every platform loads the same weights."
@@ -112,8 +124,13 @@ resource "runpod_template" "this" {
   }
 }
 
+# options.serve = false: no endpoint, so no worker and no gateway route. The volumes and the template stay, so the
+# weights stay too. Use it to take Runpod out of service without a copy of the weights later.
 resource "runpod_serverless_endpoint" "this" {
-  name           = local.name
+  count = local.serve ? 1 : 0
+
+  # Runpod keeps a copy of the template under the endpoint name, and that name must be unique too.
+  name           = runpod_template.this.name
   template_id    = runpod_template.this.id
   endpoint_type  = "LOAD_BALANCER"
   scaling_type   = "REQUEST_COUNT"
@@ -136,4 +153,9 @@ resource "runpod_serverless_endpoint" "this" {
     # args, env, ports) must replace the endpoint. The URL changes; the proxy gets the new one in the same apply.
     replace_triggered_by = [runpod_template.this]
   }
+}
+
+moved {
+  from = runpod_serverless_endpoint.this
+  to   = runpod_serverless_endpoint.this[0]
 }

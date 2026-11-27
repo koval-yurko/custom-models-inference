@@ -3,8 +3,9 @@
 
 Run from anywhere:  ./scripts/preflight.py [--weights <folder>] [--l4]   (loads the repo .env itself; no direnv needed)
 Checks: the shell and the HCP workspace variables match .env, the needed APIs are on, the buckets and the Artifact Registry repos
-are in GCP_REGION, the weights folder has files (--weights), the Vertex AI L4 quota is 1 or more (--l4).
-It cannot see GPU stock: no API shows it. A deploy is the only test for that.
+are in GCP_REGION, the weights folder has files (--weights), the Vertex AI L4 quota is 1 or more (--l4), and the prepaid
+Runpod balance (when RUNPOD_API_KEY is set): below $0.01 Runpod starts no worker and refuses an endpoint create, without an error
+on the call. It cannot see Vertex AI GPU stock: no API shows it. Runpod GPU stock: see the deployment README (Test).
 Exit 1 on a FAIL. A WARN means the script could not check.
 """
 import argparse, json, os, pathlib, re, subprocess, sys, urllib.error, urllib.request
@@ -119,6 +120,23 @@ def check_l4(project, region):
     report("ok" if any(int(v) >= 1 for v in vals) else "FAIL", f"L4 quota in {region}", "values: " + ", ".join(vals))
 
 
+def runpod_level(amount):
+    """FAIL below $0.01 (no worker starts, endpoint create fails), WARN below $1 (1 GPU test costs up to about $0.50)."""
+    return "FAIL" if amount < 0.01 else "WARN" if amount < 1 else "ok"
+
+
+def check_runpod_balance():
+    key = os.environ.get("RUNPOD_API_KEY")
+    if not key:
+        return
+    req = urllib.request.Request("https://api.runpod.io/v2/billing/balance", headers={"Authorization": f"Bearer {key}"})
+    try:
+        amount = float(json.load(urllib.request.urlopen(req, timeout=20))["balanceAmount"])
+    except Exception as e:  # noqa: BLE001 - a check that cannot run is a WARN
+        return report("WARN", "Runpod balance", f"cannot read ({e}); check the Runpod console > Billing")
+    report(runpod_level(amount), "Runpod balance", f"${amount:.2f} (prepaid; top up in the Runpod console > Billing)")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--weights", help="folder in the weights bucket, for example gemma-4-12b-it-qat-w4a16")
@@ -132,6 +150,7 @@ if __name__ == "__main__":
     check_env_and_hcp(region)
     check_apis()
     check_region(project, region)
+    check_runpod_balance()
     if a.weights:
         check_weights(project, a.weights)
     if a.l4:

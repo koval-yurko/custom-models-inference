@@ -5,7 +5,7 @@ description: Check a Terraform change before the user applies it, and read an ap
 
 # Terraform change checklist
 
-The agent does not apply or destroy (see `CLAUDE.md`), unless the user asks for it in the same turn. The agent checks the change and gives the user the steps.
+The agent may apply or destroy under the rules of `CLAUDE.md`. It checks the change first, and it uses the README steps, so the user can run the same steps by hand.
 
 ## Before the apply
 

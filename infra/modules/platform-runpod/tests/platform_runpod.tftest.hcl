@@ -46,8 +46,8 @@ run "template" {
     error_message = "env: download weights, health port and path"
   }
   assert {
-    condition     = runpod_template.this.name == "llm-a-gemma4-12b"
-    error_message = "template name is the base name"
+    condition     = startswith(runpod_template.this.name, "llm-a-gemma4-12b-") && length(runpod_template.this.name) == length("llm-a-gemma4-12b-") + 8
+    error_message = "template name is the base name plus 8 characters of the content hash"
   }
 }
 
@@ -55,19 +55,19 @@ run "endpoint" {
   command = apply
 
   assert {
-    condition     = runpod_serverless_endpoint.this.endpoint_type == "LOAD_BALANCER" && runpod_serverless_endpoint.this.scaling_type == "REQUEST_COUNT" && runpod_serverless_endpoint.this.scaling_value == 4
+    condition     = runpod_serverless_endpoint.this[0].endpoint_type == "LOAD_BALANCER" && runpod_serverless_endpoint.this[0].scaling_type == "REQUEST_COUNT" && runpod_serverless_endpoint.this[0].scaling_value == 4
     error_message = "load balancing endpoint, request count scaling, 4"
   }
   assert {
-    condition     = runpod_serverless_endpoint.this.gpu_pools == tolist(["AMPERE_24"]) && runpod_serverless_endpoint.this.gpu_count == 1
+    condition     = runpod_serverless_endpoint.this[0].gpu_pools == tolist(["AMPERE_24"]) && runpod_serverless_endpoint.this[0].gpu_count == 1
     error_message = "default pool AMPERE_24, 1 GPU"
   }
   assert {
-    condition     = runpod_serverless_endpoint.this.workers_min == 0 && runpod_serverless_endpoint.this.workers_max == 1 && runpod_serverless_endpoint.this.idle_timeout == 300
+    condition     = runpod_serverless_endpoint.this[0].workers_min == 0 && runpod_serverless_endpoint.this[0].workers_max == 1 && runpod_serverless_endpoint.this[0].idle_timeout == 300
     error_message = "scale to 0, max_replicas, idle_seconds"
   }
   assert {
-    condition     = runpod_serverless_endpoint.this.flashboot == "FLASHBOOT" && runpod_serverless_endpoint.this.template_id == runpod_template.this.id
+    condition     = runpod_serverless_endpoint.this[0].flashboot == "FLASHBOOT" && runpod_serverless_endpoint.this[0].template_id == runpod_template.this.id
     error_message = "flashboot on, endpoint from the template"
   }
 }
@@ -89,11 +89,11 @@ run "options_override" {
   }
 
   assert {
-    condition     = runpod_serverless_endpoint.this.gpu_pools == tolist(["ADA_24"]) && runpod_serverless_endpoint.this.excluded_types == tolist(["NVIDIA L40"]) && runpod_serverless_endpoint.this.scaling_value == 2
+    condition     = runpod_serverless_endpoint.this[0].gpu_pools == tolist(["ADA_24"]) && runpod_serverless_endpoint.this[0].excluded_types == tolist(["NVIDIA L40"]) && runpod_serverless_endpoint.this[0].scaling_value == 2
     error_message = "pools, excluded types and scaling value from options"
   }
   assert {
-    condition     = runpod_template.this.disk == 80 && runpod_template.this.name == "other" && runpod_serverless_endpoint.this.name == "other"
+    condition     = runpod_template.this.disk == 80 && startswith(runpod_template.this.name, "other-") && runpod_serverless_endpoint.this[0].name == runpod_template.this.name
     error_message = "disk and names from options"
   }
   assert {
@@ -211,7 +211,7 @@ run "own_image_with_volume" {
     error_message = "1 network volume per data center, 20 GB STANDARD"
   }
   assert {
-    condition     = length(runpod_serverless_endpoint.this.network_volumes) == 2 && runpod_serverless_endpoint.this.data_center_ids == tolist(["EU-RO-1", "EUR-IS-1"])
+    condition     = length(runpod_serverless_endpoint.this[0].network_volumes) == 2 && runpod_serverless_endpoint.this[0].data_center_ids == tolist(["EU-RO-1", "EUR-IS-1"])
     error_message = "the endpoint mounts all volumes and runs only in their data centers"
   }
   assert {
@@ -248,11 +248,11 @@ run "excluded_data_center_keeps_volume_and_workers_max" {
     error_message = "an excluded data center keeps its volume"
   }
   assert {
-    condition     = length(runpod_serverless_endpoint.this.network_volumes) == 1 && runpod_serverless_endpoint.this.data_center_ids == tolist(["EUR-IS-1"])
+    condition     = length(runpod_serverless_endpoint.this[0].network_volumes) == 1 && runpod_serverless_endpoint.this[0].data_center_ids == tolist(["EUR-IS-1"])
     error_message = "the endpoint does not use the excluded data center"
   }
   assert {
-    condition     = runpod_serverless_endpoint.this.workers_max == 0
+    condition     = runpod_serverless_endpoint.this[0].workers_max == 0
     error_message = "options.workers_max overrides spec.max_replicas"
   }
 }
@@ -301,7 +301,7 @@ run "stock_image_has_no_volume_or_registry" {
   command = apply
 
   assert {
-    condition     = length(runpod_network_volume.this) == 0 && length(coalesce(runpod_serverless_endpoint.this.network_volumes, [])) == 0 && output.volumes == null
+    condition     = length(runpod_network_volume.this) == 0 && length(coalesce(runpod_serverless_endpoint.this[0].network_volumes, [])) == 0 && output.volumes == null
     error_message = "LLM-A (stock image, no volume option) gets no volume"
   }
   assert {
@@ -323,7 +323,7 @@ run "template_change_replaces_endpoint" {
   }
 
   assert {
-    condition     = runpod_serverless_endpoint.this.id != run.before_change.endpoint_id
+    condition     = runpod_serverless_endpoint.this[0].id != run.before_change.endpoint_id
     error_message = "a changed template must give a new endpoint, else the workers keep the old args"
   }
 }
@@ -390,4 +390,37 @@ run "model_without_weights_fails" {
   }
 
   expect_failures = [runpod_template.this]
+}
+
+run "serve_false_keeps_volumes_and_template" {
+  command = apply
+
+  override_module {
+    target  = module.registry[0]
+    outputs = { id = "reg1" }
+  }
+
+  variables {
+    name = "stt-a-qwen3-asr-diar"
+    spec = {
+      image        = { own = "stt-a-qwen3-asr-diar:0.2.0" }
+      args         = []
+      port         = 8080
+      health_route = "/health"
+      routes       = ["/v1beta/interactions"]
+      gpu          = "L4"
+      weights      = { hf_repo = "Qwen/Qwen3-ASR-1.7B", gcs_dir = "stt-a-qwen3-asr-diar" }
+    }
+    options = { serve = false, volume = { data_centers = ["EU-RO-1"] } }
+  }
+
+  assert {
+    condition     = length(runpod_serverless_endpoint.this) == 0 && output.target == null && output.endpoint_id == null
+    error_message = "serve = false makes no endpoint and no target"
+  }
+
+  assert {
+    condition     = keys(runpod_network_volume.this) == ["EU-RO-1"] && output.volumes.dir == "stt-a-qwen3-asr-diar"
+    error_message = "serve = false keeps the volumes"
+  }
 }
