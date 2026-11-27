@@ -1,0 +1,13 @@
+# Where LLM-A runs, and the settings that change most often. main.tf reads this file (yamldecode).
+# Change it, run ./scripts/check.py, then terraform plan and apply (README, "Deploy").
+# Keys: infra/README.md, "deploy.yaml (per deployment)".
+platforms:
+  - id: vertex
+    serve: true
+
+  - id: runpod
+    serve: true
+    # 0 parks the endpoint (no worker starts) and keeps it. Parked on 2026-11-24 (focus on STT-A).
+    workers_max: 0
+    # 24 GB Ampere GPUs (L4, RTX 3090, A5000). Stock vLLM, weights from Hugging Face: no volume, no data-center limit.
+    gpu_pools: [AMPERE_24]

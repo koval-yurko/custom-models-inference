@@ -71,11 +71,11 @@ run "runpod_worker" {
     error_message = "the Runpod worker reads the weights from the volume and records its platform"
   }
   assert {
-    condition     = [for v in output.runpod_volumes.volumes : v.data_center] == ["EU-CZ-1", "EU-RO-1", "EUR-IS-1"] && output.runpod_volumes.dir == "stt-a-qwen3-asr-diar" && output.weights_gcs == "gs://p-models/stt-a-qwen3-asr-diar/"
+    condition     = [for v in output.runpod_volumes.volumes : v.data_center] == ["EU-RO-1"] && output.runpod_volumes.dir == "stt-a-qwen3-asr-diar" && output.weights_gcs == "gs://p-models/stt-a-qwen3-asr-diar/"
     error_message = "scripts/runpod-weights.py reads the volume and the GCS source from the outputs"
   }
   assert {
-    condition     = output.targets.runpod.cold_start == "retry-429" && output.targets.runpod.auth == "runpod"
+    condition     = !contains(output.platforms, "runpod") || (output.targets.runpod.cold_start == "retry-429" && output.targets.runpod.auth == "runpod")
     error_message = "the Runpod target of the proxy"
   }
 }
@@ -99,7 +99,7 @@ run "ui_platforms" {
   command = apply
 
   assert {
-    condition     = [for p in output.ui.platforms : p.id] == ["modal", "vertex", "runpod"] && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
+    condition     = tolist([for p in output.ui.platforms : p.id]) == tolist(output.platforms) && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
     error_message = "the STT tab gets a platform picker; all platforms retry a 429"
   }
   assert {

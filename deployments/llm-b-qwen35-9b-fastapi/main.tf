@@ -30,9 +30,10 @@ provider "google-beta" {
 }
 
 locals {
-  # Platforms of this model, in order. The first one is the default for the old paths without a prefix.
-  # See infra/README.md, "Module: model (platforms)".
-  platforms = ["vertex", "runpod"]
+  # Platforms and their common settings come from deploy.yaml. See infra/README.md, "Module: model (platforms)".
+  deploy    = yamldecode(file("${path.module}/deploy.yaml"))
+  platforms = [for p in local.deploy.platforms : p.id]
+  cfg       = { for p in local.deploy.platforms : p.id => p }
   # Filled by the weights-copy job (TARGET_DIR) from RedHatAI/Qwen3.5-9B-FP8-dynamic. Vertex AI streams it from GCS;
   # on Runpod it is on the network volume (scripts/runpod-weights.py copies it there).
   model_dir = "qwen3.5-9b-fp8"
@@ -71,15 +72,19 @@ module "model" {
 
   platform_options = {
     vertex = {
+      serve                 = try(local.cfg.vertex.serve, true)
       machine_type          = "g2-standard-8"
       shared_memory_size_mb = 16384
       deployment_timeout    = "1800s"
       # No predict_route: :invoke reaches every route of app.py (<endpoint>/invoke/<route>).
     }
     runpod = {
+      # serve, data_centers, volume_gb, workers_max, flashboot, gpu_pools, excluded_types: see deploy.yaml.
+      serve = try(local.cfg.runpod.serve, true)
       # 24 GB GPUs, as the L4. Ampere (A5000, 3090) has no native FP8: vLLM runs the FP8 weights as W8A16, and the KV
       # cache stays in the model dtype.
-      gpu_pools = ["AMPERE_24", "ADA_24"]
+      gpu_pools      = try(local.cfg.runpod.gpu_pools, ["AMPERE_24", "ADA_24"])
+      excluded_types = try(local.cfg.runpod.excluded_types, [])
       env = {
         KV_CACHE_DTYPE = "auto"
         # Slack messages from the container itself (image/app.py: "ready" after the load, "scaled to 0" at SIGTERM). Runpod
@@ -88,14 +93,15 @@ module "model" {
         SLACK_CHANNEL   = "{{ RUNPOD_SECRET_slack_channel }}"
         SLACK_TITLE     = "LLM-B Qwen3.5 9B on Runpod"
       }
-      # The weights (about 14 GB): 1 volume per data center (all with the S3 API for scripts/runpod-weights.py). A worker
-      # starts only where a volume is, and 24 GB GPUs are often out of stock in 1 data center, so 3 give more chances.
-      # 40 GB: the S3 upload of model.safetensors (13.5 GB) keeps its parts on the volume until the complete call joins
-      # them, so the copy needs about 2 times the largest file. A full volume answers 403.
-      volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 40 }
-      # Parked on 2026-11-24: the load balancer never reached the worker. The cause (bind on "::", no /ping) is fixed in
-      # image/app.py; build image_tag 0.2.3 first, then remove this to serve again (see the STT-A README, 2026-11-25 row).
-      workers_max = 0
+      # The weights (about 14 GB): 1 volume per data center in deploy.yaml. A worker starts only where a volume is.
+      # Each copy bills $0.07/GB/month (docs/research/11-weights-storage-options.md). 40 GB: the S3 upload of
+      # model.safetensors (13.5 GB) keeps its parts on the volume until the complete call joins them, so the copy needs
+      # about 2 times the largest file. A full volume answers 403.
+      volume      = { data_centers = local.cfg.runpod.data_centers, size_gb = try(local.cfg.runpod.volume_gb, 40) }
+      workers_max = try(local.cfg.runpod.workers_max, 1)
+      # FlashBoot OFF in deploy.yaml, as STT-A: on 2026-11-26 the FlashBoot endpoint kept 1 stopped worker (IDLE, no
+      # uptime) after an update, started no new worker, and held every call.
+      flashboot = try(local.cfg.runpod.flashboot, "FLASHBOOT")
     }
   }
 }

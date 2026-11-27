@@ -1,3 +1,8 @@
+output "serving_platforms" {
+  description = "Platforms that serve calls (proxy targets and gateway paths), in the order of platforms."
+  value       = tolist(local.serving)
+}
+
 output "platforms" {
   description = "Platform ids in order. The first one is the default."
   value       = var.platforms
@@ -10,7 +15,7 @@ output "targets" {
 
 output "ui_platforms" {
   description = "Platforms for the ui output of the deployment (scripts/ui-deploy.py -> models.json), in the order of platforms."
-  value = [for p in var.platforms : {
+  value = [for p in local.serving : {
     id         = p
     label      = local.targets[p].label
     base_url   = "${module.gateway.gateway_url}/${p}"
@@ -76,7 +81,7 @@ output "runpod_args" {
 output "scale_watch_ids" {
   description = "Platform id to the ID that the infra/core job scale-watch prints (Runpod endpoint). Only platforms without GCP logs. For the Slack alerts in alerts.tf."
   value = merge(
-    contains(var.platforms, "runpod") ? { runpod = module.runpod[0].endpoint_id } : {},
+    contains(local.serving, "runpod") ? { runpod = module.runpod[0].endpoint_id } : {},
   )
 }
 

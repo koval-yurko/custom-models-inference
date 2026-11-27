@@ -78,12 +78,12 @@ run "runpod_worker" {
     error_message = "Ampere GPUs have no native FP8: the KV cache uses the model dtype on Runpod"
   }
   assert {
-    condition     = [for v in output.runpod_volumes.volumes : v.data_center] == ["EU-CZ-1", "EU-RO-1", "EUR-IS-1"] && output.runpod_volumes.dir == "qwen3.5-9b-fp8" && output.weights_gcs == "gs://p-models/qwen3.5-9b-fp8/"
+    condition     = [for v in output.runpod_volumes.volumes : v.data_center] == ["EU-RO-1"] && output.runpod_volumes.dir == "qwen3.5-9b-fp8" && output.weights_gcs == "gs://p-models/qwen3.5-9b-fp8/"
     error_message = "scripts/runpod-weights.py reads the volume and the GCS source from the outputs"
   }
   assert {
-    condition     = output.targets.runpod.cold_start == "retry-429" && output.targets.runpod.auth == "runpod" && output.targets.runpod.append_path == true
-    error_message = "the Runpod target of the proxy"
+    condition     = !contains(output.platforms, "runpod") || (output.targets.runpod.cold_start == "retry-429" && output.targets.runpod.auth == "runpod" && output.targets.runpod.append_path == true)
+    error_message = "the Runpod target of the proxy (when runpod serves in deploy.yaml)"
   }
 }
 
@@ -91,7 +91,7 @@ run "ui_platforms" {
   command = apply
 
   assert {
-    condition     = [for p in output.ui.platforms : p.id] == ["vertex", "runpod"] && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
+    condition     = tolist([for p in output.ui.platforms : p.id]) == tolist(output.platforms) && alltrue([for p in output.ui.platforms : p.cold_start == "retry-429"])
     error_message = "the tab gets a platform picker; both platforms retry a 429"
   }
   assert {

@@ -30,10 +30,10 @@ provider "google-beta" {
 }
 
 locals {
-  # Platforms of this model, in order. The first one is the default for the old paths without a prefix.
-  # See infra/README.md, "Module: model (platforms)".
-  # modal is first (the default for the old paths and the UI): on 2026-11-25 it was the only platform with a free GPU.
-  platforms = ["modal", "vertex", "runpod"]
+  # Platforms and their common settings come from deploy.yaml. See infra/README.md, "Module: model (platforms)".
+  deploy    = yamldecode(file("${path.module}/deploy.yaml"))
+  platforms = [for p in local.deploy.platforms : p.id]
+  cfg       = { for p in local.deploy.platforms : p.id => p }
   # 3 weights-copy runs fill this folder: asr/, aligner/ and pyannote/ (see README.md). Vertex AI copies it from GCS
   # at start; on Runpod it is on the network volume (scripts/runpod-weights.py copies it there); on Modal it is on the
   # Modal Volume (scripts/platforms/modal.py fills it from Hugging Face).
@@ -103,6 +103,7 @@ module "model" {
     # Modal (infra/modules/platform-modal): scripts/deploy.py runs scripts/platforms/modal.py after apply. 4 cores and
     # 32 GiB are the default size (ffmpeg decode and Pyannote run on the CPU).
     modal = {
+      serve     = try(local.cfg.modal.serve, true)
       workspace = var.modal_workspace
       command   = ["python3", "-m", "speech_engine.main"] # the image ENTRYPOINT (Modal does not run it)
       workdir   = "/srv"
@@ -120,6 +121,7 @@ module "model" {
       env = { SLACK_TITLE = "STT-A Qwen3 ASR + speakers on Modal" }
     }
     vertex = {
+      serve = try(local.cfg.vertex.serve, true)
       # 12 vCPU and 48 GB RAM: ffmpeg decode and Pyannote clustering run on the CPU.
       machine_type          = "g2-standard-12"
       shared_memory_size_mb = 16384
@@ -127,8 +129,11 @@ module "model" {
       predict_route         = "/v1beta/interactions" # :rawPredict. The app has 1 route.
     }
     runpod = {
+      # serve, data_centers, volume_gb, workers_max, flashboot, gpu_pools, excluded_types: see deploy.yaml.
+      serve = try(local.cfg.runpod.serve, true)
       # 24 GB GPUs, as the L4. All of them run bf16.
-      gpu_pools = ["AMPERE_24", "ADA_24"]
+      gpu_pools      = try(local.cfg.runpod.gpu_pools, ["AMPERE_24", "ADA_24"])
+      excluded_types = try(local.cfg.runpod.excluded_types, [])
       env = {
         # Slack messages from the container itself (speech_engine/main.py: "ready" after the load, "scaled to 0" at SIGTERM). Runpod
         # writes no logs to GCP. The 2 values are Runpod secrets that scripts/hcp-sync.py makes from .env.
@@ -136,13 +141,11 @@ module "model" {
         SLACK_CHANNEL   = "{{ RUNPOD_SECRET_slack_channel }}"
         SLACK_TITLE     = "STT-A Qwen3 ASR + speakers on Runpod"
       }
-      # The weights: 1 volume per data center (all with the S3 API for scripts/runpod-weights.py). A worker starts only
-      # where a volume is, and 24 GB GPUs are often out of stock in 1 data center, so 3 give more chances.
-      volume = { data_centers = ["EU-RO-1", "EUR-IS-1", "EU-CZ-1"], size_gb = 20 }
-      # Parked (no worker starts). Set 1 to serve; scale to 0 after idle works then (first answer 2026-11-25, 0.2.6).
-      workers_max = 0
-      # FlashBoot off: the account allows 3 FlashBoot endpoints, and a replace of this endpoint needs a 4th slot.
-      flashboot = "OFF"
+      # The weights: 1 volume per data center in deploy.yaml. A worker starts only where a volume is. Each copy bills
+      # $0.07/GB/month (docs/research/11-weights-storage-options.md).
+      volume      = { data_centers = local.cfg.runpod.data_centers, size_gb = try(local.cfg.runpod.volume_gb, 20) }
+      workers_max = try(local.cfg.runpod.workers_max, 1)
+      flashboot   = try(local.cfg.runpod.flashboot, "FLASHBOOT")
     }
   }
 

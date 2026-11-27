@@ -41,8 +41,8 @@ run "gateway_requires_api_key" {
     error_message = "only the OPTIONS (CORS preflight) operations may override the global security"
   }
   assert {
-    condition     = toset(keys(module.model.openapi.paths)) == toset(flatten([for prefix in ["", "/vertex", "/runpod"] : ["${prefix}/generate", "${prefix}/extract"]]))
-    error_message = "the gateway exposes /generate and /extract, the old paths and /vertex/ and /runpod/ (/health stays private)"
+    condition     = toset(keys(module.model.openapi.paths)) == toset(flatten([for prefix in concat([""], [for p in module.model.serving_platforms : "/${p}"]) : ["${prefix}/generate", "${prefix}/extract"]]))
+    error_message = "the gateway exposes /generate and /extract, the old paths and /<platform>/ for each platform that serves in deploy.yaml (/health stays private)"
   }
   assert {
     condition = alltrue(flatten([for ops in values(module.model.openapi.paths) : [

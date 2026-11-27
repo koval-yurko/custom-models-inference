@@ -59,7 +59,7 @@ run "stt_api_service" {
       SA_EMAIL     = module.stt_api.service_account_email
       IMAGE_TAG    = "0.2.6"
       TARGET       = module.model.proxy_url
-      PLATFORMS    = "modal,vertex,runpod"
+      PLATFORMS    = join(",", module.model.serving_platforms) # the platforms that serve in deploy.yaml
     }
     error_message = "the STT API service calls the GPU through the CORS proxy; a path prefix picks the platform"
   }

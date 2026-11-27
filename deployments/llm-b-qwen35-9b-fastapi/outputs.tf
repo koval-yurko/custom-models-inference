@@ -21,7 +21,7 @@ output "vertex" {
 # scripts/deploy.py reads these outputs.
 output "platforms" {
   description = "Platform ids in order. The first one is the default."
-  value       = module.model.platforms
+  value       = module.model.serving_platforms # serve = false platforms are left out
 }
 
 output "targets" {

@@ -10,7 +10,7 @@ locals {
     SA_EMAIL     = module.stt_api.service_account_email # it signs the URL as itself (signBlob)
     IMAGE_TAG    = var.image_tag                        # stored in each version: which GPU image made it
     TARGET       = module.model.proxy_url
-    PLATFORMS    = join(",", local.platforms) # a path prefix picks one; no prefix: the first
+    PLATFORMS    = join(",", module.model.serving_platforms) # a path prefix picks one; no prefix: the first
   }
 }
 

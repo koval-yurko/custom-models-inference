@@ -1,0 +1,33 @@
+# Where STT-A runs, and the settings that change most often. main.tf reads this file (yamldecode).
+# Change it, run ./scripts/check.py, then terraform plan and apply (README, "Deploy").
+#
+# platforms: a list, in order. The first platform that serves is the default for the old paths without a prefix and
+#   for the UI.
+# serve: false keeps the resources of a platform (Vertex AI endpoint, Runpod volume with the weights, template) but
+#   gives it no route: the proxy, the gateway and the STT API leave it out, and on Runpod no endpoint exists.
+#   To remove a platform and all its resources (also the weights on its volume), delete its entry.
+platforms:
+  # Modal first: on 2026-11-25 it was the only platform with a free GPU.
+  - id: modal
+    serve: true
+
+  - id: vertex
+    # false since 2026-11-27: the endpoint stays, but no model is deployed. To serve again: set true, apply, then
+    # ./scripts/deploy.py deploy deployments/stt-a-qwen3-asr-diar --platform vertex (README, "Deploy").
+    serve: false
+
+  - id: runpod
+    # false since 2026-11-27: no Runpod endpoint, only the volume with the weights. Set it to true to serve again.
+    # Runpod refuses to create an endpoint when the balance is below $0.01 (check with ./scripts/preflight.py).
+    serve: false
+    # The volume of the weights, and so the only data center of the workers. EU-RO-1 had the most 24 GB stock
+    # (RTX 4090, L4) on 2026-11-27. Each data center is 1 more copy at $0.07/GB/month.
+    data_centers: [EU-RO-1]
+    volume_gb: 20
+    # 0 parks the endpoint (no worker starts) and keeps it.
+    workers_max: 0
+    # OFF, FLASHBOOT or PRIORITY_FLASHBOOT. The account allows 3 endpoints with FlashBoot.
+    flashboot: "OFF"
+    # 24 GB GPUs. AMPERE_24: L4, RTX 3090, A5000; ADA_24: RTX 4090. Runpod has no GPU order.
+    gpu_pools: [AMPERE_24, ADA_24]
+    excluded_types: []

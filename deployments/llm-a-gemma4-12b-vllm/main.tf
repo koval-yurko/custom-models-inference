@@ -31,8 +31,10 @@ provider "google-beta" {
 
 locals {
   # Platforms of this model, in order. The first one is the default for the old paths without a prefix.
-  # See infra/README.md, "Module: model (platforms)".
-  platforms = ["vertex", "runpod"]
+  # Platforms and their common settings come from deploy.yaml. See infra/README.md, "Module: model (platforms)".
+  deploy    = yamldecode(file("${path.module}/deploy.yaml"))
+  platforms = [for p in local.deploy.platforms : p.id]
+  cfg       = { for p in local.deploy.platforms : p.id => p }
   # Filled by the weights-copy job (TARGET_DIR).
   model_dir = "gemma-4-12b-it-qat-w4a16"
 }
@@ -70,6 +72,7 @@ module "model" {
 
   platform_options = {
     vertex = {
+      serve                 = try(local.cfg.vertex.serve, true)
       machine_type          = "g2-standard-12"
       shared_memory_size_mb = 16384
       deployment_timeout    = "1800s"
@@ -79,9 +82,10 @@ module "model" {
     }
     # L4, A5000 or 3090: Ampere has no native FP8, so no --kv-cache-dtype=fp8 here. vLLM downloads the weights at start.
     runpod = {
-      gpu_pools = ["AMPERE_24"]
-      # Parked on 2026-11-24 (focus on STT-A): no worker starts. Remove the line to serve again.
-      workers_max = 0
+      # serve, workers_max, gpu_pools: see deploy.yaml.
+      serve       = try(local.cfg.runpod.serve, true)
+      gpu_pools   = try(local.cfg.runpod.gpu_pools, ["AMPERE_24"])
+      workers_max = try(local.cfg.runpod.workers_max, 1)
     }
   }
 }

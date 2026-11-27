@@ -1,0 +1,25 @@
+# Where LLM-B runs, and the settings that change most often. main.tf reads this file (yamldecode).
+# Change it, run ./scripts/check.py, then terraform plan and apply (README, "Deploy").
+#
+# platforms: a list, in order. The first platform that serves is the default for the old paths without a prefix.
+# serve: false keeps the resources of a platform (Vertex AI endpoint, Runpod volume with the weights, template) but
+#   gives it no endpoint route: the proxy and the gateway leave it out, and on Runpod no endpoint exists.
+#   To remove a platform and all its resources (also the weights on its volume), delete its entry.
+platforms:
+  - id: vertex
+    serve: true
+
+  - id: runpod
+    # Runpod refuses to create an endpoint when the balance is below $0.01 (check with ./scripts/preflight.py).
+    serve: true
+    # The volume of the weights, and so the only data center of the workers. EU-RO-1 had the most 24 GB stock
+    # (RTX 4090, L4) on 2026-11-27. Each data center is 1 more copy at $0.07/GB/month.
+    data_centers: [EU-RO-1]
+    volume_gb: 40
+    # 0 parks the endpoint (no worker starts) and keeps it.
+    workers_max: 1
+    # OFF, FLASHBOOT or PRIORITY_FLASHBOOT. The account allows 3 endpoints with FlashBoot.
+    flashboot: "OFF"
+    # 24 GB GPUs. AMPERE_24: L4, RTX 3090, A5000; ADA_24: RTX 4090. Runpod has no GPU order.
+    gpu_pools: [AMPERE_24, ADA_24]
+    excluded_types: ["NVIDIA RTX A5000", "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb"]
