@@ -64,6 +64,15 @@ class RunpodCounts(unittest.TestCase):
         self.assertEqual(sw.runpod_counts("k", None, fake_get(down), p), {"runpod/ep1": ("llm-b", 0)})
         self.assertEqual(p.calls, [])
 
+    def test_own_image_endpoints_that_post_to_slack_get_no_request(self):
+        # Measured 2026-11-27: the /health probe reset the 300 s idle timer of LLM-B, and the GPU ran 5 more minutes.
+        own = {"https://api.runpod.io/v2/serverless": {"endpoints": [
+            {"id": "ep1", "name": "llm-b", "env": {"SLACK_TITLE": "LLM-B on Runpod", "PORT": "8000"}}]}}
+        get, p = fake_get(own), self.probe(True)
+        self.assertEqual(sw.runpod_counts("k", {"runpod/ep1": 0}, get, p), {})
+        self.assertEqual(len(get.calls), 1)
+        self.assertEqual(p.calls, [])
+
 
 class Events(unittest.TestCase):
     def test_first_run_only_records(self):

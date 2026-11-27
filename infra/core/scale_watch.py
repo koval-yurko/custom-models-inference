@@ -38,10 +38,14 @@ def runpod_counts(key, prev=None, get=http_get, probe=health_ok):
     uptime. A FlashBoot worker that has stopped stays in the list as IDLE without uptimeSeconds (measured 2026-11-23),
     so the summary counts are not used. A worker is up minutes before the model loads, so an endpoint that had 0 ready
     workers in the last run counts as ready only when its /health answers 200. The probe goes only to an endpoint with
-    an up worker (it never wakes one at 0) and stops once it is ready (it does not keep the worker busy)."""
+    an up worker (it never wakes one at 0) and stops once it is ready (it does not keep the worker busy).
+    An endpoint with SLACK_TITLE in its env runs an own image that posts its own Slack messages (STT-A, LLM-B), so it
+    is skipped: each probe is a request that resets the 300 s idle timer (measured 2026-11-27 on LLM-B)."""
     auth = f"Bearer {key}"
     out = {}
     for e in get(RUNPOD, auth).get("endpoints", []):
+        if "SLACK_TITLE" in (e.get("env") or {}):
+            continue
         k = f"runpod/{e['id']}"
         workers = get(f"{RUNPOD}/{e['id']}/workers", auth).get("workers", [])
         up = sum(1 for w in workers if w.get("status") in ("IDLE", "RUNNING") and w.get("uptimeSeconds") is not None)
