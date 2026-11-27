@@ -44,6 +44,7 @@ A deployment on the `model` module adds 1 key and changes `base_url`:
     platforms = module.model.ui_platforms               # [{ id, label, base_url = "<gateway>/<id>", cold_start }], in the order of local.platforms
 ```
 
+- Add `status = module.model.ui_status` too: the Home page table reads it (`{ version, platforms = [{ id, serve, parked }] }`). A deployment without the model module writes it by hand, for example TTS-A: `status = { version = local.image, platforms = [{ id = "cloudrun", serve = true }] }`. `ui-deploy.py` moves it from the tab entry to `status` in `models.json`.
 - `scripts/ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`), and the tab when no platform is left. Then `base_url` is the first platform that is left.
 - The tab shows a platform picker when 2 or more platforms are left. The panel gets `base_url` and `cold_start` of the chosen platform; the panel code does not change. The choice stays in `localStorage` per model and in the hash `#/<tab>@<platform>` (an STT link is `#/<tab>[@<platform>]/<file id>[/<version id>|/ref/<view>?v=<version id>|/compare?a=<ref|version id>&b=<version id>]`, or `#/<tab>[@<platform>]/all`).
 - Examples: `deployments/llm-a-gemma4-12b-vllm/outputs.tf`, `deployments/stt-a-qwen3-asr-diar/outputs.tf` (STT: the files paths get the same `/<platform>` prefix, so the panel works on each platform with no change). Mock: `llm-mock` and `stt-mock` in `ui/public/models.mock.json`; `ui/mock-server.mjs` accepts every route with a `/vertex` or `/runpod` prefix.

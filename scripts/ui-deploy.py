@@ -9,11 +9,13 @@ A deployment is in the UI when its outputs.tf has `output "ui"` and its state ha
 A Vertex AI deployment (it has `output "vertex"`) is in the UI only when its endpoint has a deployed model.
 A deployment on infra/modules/model (its `ui` output has `platforms`) keeps only the deployed platforms
 (scripts/deploy.py status: the post-apply step says so, or the platform has no post-apply step). No platform left: no tab.
+models.json also has `status`: 1 row per deployment with a `ui` output, for the Home page (model, version, the state of
+each platform: serving, parked, not deployed, off). A platform with serve: false in deploy.yaml is "off".
 scripts/deploy.py (and scripts/vertex.py) deploy and undeploy run `--config-only` at the end, so the tabs follow each change.
 Run again after every apply or scripts/gateway-streaming.py:
 both can change the gateway URL. Schema of the output: .claude/skills/model-ui/SKILL.md.
 """
-import json, os, pathlib, subprocess, sys
+import datetime, json, os, pathlib, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import deploy  # noqa: E402
@@ -90,12 +92,24 @@ def platform_deployed(d, targets):
     return out
 
 
+def status_row(entry, status, deployed, tab):
+    """1 row of the Home page table. status: the `status` field of the ui output ({version, platforms: [{id, serve}]}),
+    None before the deployment is applied with it. deployed: platform id -> deployed (missing = deployed).
+    tab: the UI has a tab for this model. State per platform: off (serve false), parked (Runpod workers_max 0), not deployed, serving."""
+    status = status or {}
+    plats = status.get("platforms") or [{"id": p["id"], "serve": True} for p in entry.get("platforms", [])]
+    state = lambda p: ("off" if not p["serve"] else "parked" if p.get("parked") else
+                       "serving" if deployed.get(p["id"], True) else "not deployed")
+    return {"id": entry["id"], "title": entry["title"], "type": entry["type"], "version": status.get("version", ""),
+            "tab": tab, "platforms": [{"id": p["id"], "state": state(p)} for p in plats]}
+
+
 def tf_output(d, name):
     return subprocess.run(["terraform", "output", "-no-color", "-json", name], cwd=d, text=True, capture_output=True)
 
 
 def collect():
-    models = []
+    models, rows = [], []
     for d in sorted((ROOT / "deployments").iterdir()):
         out = d / "outputs.tf"
         out_tf = out.read_text() if out.exists() else ""
@@ -108,20 +122,25 @@ def collect():
             reason = next((l for l in r.stderr.splitlines() if l.startswith("Error")), r.stderr.strip()[:200])
             print(f"skip {d.name}: {reason} (apply the deployment first: a new output is in the state only after apply)")
             continue
-        entry = json.loads(r.stdout)
-        if "platforms" in entry:
+        full = json.loads(r.stdout)
+        status = full.pop("status", None)
+        deployed, entry = {}, full
+        if "platforms" in full:
             t = tf_output(d, "targets")
-            entry = keep_deployed(entry, platform_deployed(d, json.loads(t.stdout)) if not t.returncode else {})
+            deployed = platform_deployed(d, json.loads(t.stdout)) if not t.returncode else {}
+            entry = keep_deployed(full, deployed)
             if entry is None:
                 print(f"skip {d.name}: no deployed platform (run scripts/deploy.py deploy {d.relative_to(ROOT)})")
-                continue
         elif not has_deployed_model(d, out_tf):
             print(f"skip {d.name}: no deployed model on the Vertex AI endpoint (run scripts/deploy.py deploy {d.relative_to(ROOT)})")
+            entry = None
+        rows.append(status_row(full, status, deployed, entry is not None))
+        if entry is None:
             continue
         models.append(entry)
         ids = f" ({', '.join(p['id'] for p in entry['platforms'])})" if "platforms" in entry else ""
         print(f"add  {d.name}: {entry['base_url']}{ids}")
-    return models
+    return models, rows
 
 
 def main():
@@ -132,7 +151,9 @@ def main():
         sys.exit(__doc__)
 
     config = UI / "public" / "models.json"
-    config.write_text(json.dumps({"models": collect()}, indent=2) + "\n")
+    models, rows = collect()
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    config.write_text(json.dumps({"generated_at": now, "models": models, "status": rows}, indent=2) + "\n")
     print(f"wrote {config.relative_to(ROOT)}")
     if mode == "--local":
         return

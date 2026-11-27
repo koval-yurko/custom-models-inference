@@ -190,3 +190,13 @@ button.chip.refed-spk { background: transparent; border: 1px solid; padding: 1px
 .refed-text { width: 100%; border: 0; background: transparent; resize: none; field-sizing: content; min-height: 1.6em; font-size: 1rem; line-height: 1.55; padding: 2px 0; }
 .refed-text:focus { outline: none; }
 .refed-raw { width: 100%; min-height: calc(100vh - 260px); font-family: ui-monospace, monospace; font-size: .85rem; line-height: 1.5; }
+.status { border-collapse: collapse; width: 100%; margin: 0 0 12px; }
+.status th, .status td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.status th { font-size: .85rem; opacity: .7; font-weight: 600; }
+.status code { font-size: .8rem; word-break: break-all; }
+.state { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .8rem; white-space: nowrap; }
+.state.serving { background: color-mix(in srgb, #2a9d4b 20%, transparent); color: #1f7a3a; }
+.state.not-deployed { background: color-mix(in srgb, #d9a400 22%, transparent); color: #8a6a00; }
+.state.parked { background: color-mix(in srgb, #3b7dd8 18%, transparent); color: #2a5fa8; }
+.state.off { background: color-mix(in srgb, currentColor 10%, transparent); opacity: .75; }
+@media (prefers-color-scheme: dark) { .state.serving { color: #6fdc8c; } .state.not-deployed { color: #f0c94a; } .state.parked { color: #8fb8f0; } }

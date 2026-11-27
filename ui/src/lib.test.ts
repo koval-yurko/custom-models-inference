@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, retriesOn429, retryPlan, waitText } from "./api";
 import { pcm16ToFloat32, wavFromPcm } from "./audio";
-import { choosePlatform, hashPick, parseHash, parseModels, sttHash, withPlatform } from "./config";
+import { choosePlatform, hashPick, parseHash, parseModels, parseStatus, platformLabel, sttHash, withPlatform } from "./config";
 import { parseSchema } from "./panels/LlmRoutes";
 import {
   bestCpwer, hasUnsavedEdits, insertTurn, mergeTurns, resolveView, clock, draftFromVersion, formatReference, gatewayTimedOut, groupTurns, importReference, namesBody, nearestTurn, parseReference, previousScore, refSeconds,
@@ -508,5 +508,24 @@ describe("hasUnsavedEdits", () => {
   it("is true for typed or imported text", () => {
     expect(hasUnsavedEdits("A: Hi there", saved)).toBe(true);
     expect(hasUnsavedEdits("B: new", undefined)).toBe(true);
+  });
+});
+
+describe("parseStatus", () => {
+  const row = { id: "a", title: "A", type: "llm", version: "img:1", tab: true, platforms: [{ id: "vertex", state: "off" }, { id: "runpod", state: "parked" }, { id: "modal", state: "serving" }] };
+  it("reads the rows", () => {
+    expect(parseStatus({ status: [row] })).toEqual([row]);
+  });
+  it("is empty for an old models.json without status", () => {
+    expect(parseStatus({ models: [] })).toEqual([]);
+  });
+  it("defaults a missing version and tab", () => {
+    expect(parseStatus({ status: [{ ...row, version: undefined, tab: undefined }] })[0]).toMatchObject({ version: "", tab: false });
+  });
+  it("rejects an unknown state", () => {
+    expect(() => parseStatus({ status: [{ ...row, platforms: [{ id: "vertex", state: "up" }] }] })).toThrow(/state/);
+  });
+  it("labels the platforms", () => {
+    expect([platformLabel("vertex"), platformLabel("cloudrun"), platformLabel("x")]).toEqual(["Vertex AI", "Cloud Run", "x"]);
   });
 });

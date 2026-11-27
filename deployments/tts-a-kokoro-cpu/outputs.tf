@@ -40,5 +40,7 @@ output "ui" {
       formats       = ["mp3", "wav", "opus", "flac", "pcm"]
       sample_rate   = 24000 # of the "pcm" format: 16-bit mono
     }
+    # The Home page of the UI: 1 platform, Cloud Run, always serving.
+    status = { version = local.image, platforms = [{ id = "cloudrun", serve = true }] }
   }
 }

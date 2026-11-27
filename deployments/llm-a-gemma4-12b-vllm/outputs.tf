@@ -65,5 +65,7 @@ output "ui" {
     }
     # 1 entry per platform: { id, label, base_url, cold_start }. cold_start is per platform (retry-429: the UI retries a real 429 every 30 s).
     platforms = module.model.ui_platforms
+    # The Home page of the UI: the image and every platform of deploy.yaml with its serve flag.
+    status = module.model.ui_status
   }
 }

@@ -98,4 +98,8 @@ run "ui_platforms" {
     condition     = output.ui.base_url == "${output.gateway_url}/vertex" && output.ui.type == "llm-routes" && output.ui.features.routes == ["/generate", "/extract"]
     error_message = "the default platform is the first; the panel gets the routes"
   }
+  assert {
+    condition     = output.ui.status.version == "llm-b-qwen35-9b-fastapi:0.2.3" && [for p in output.ui.status.platforms : p.id] == ["vertex", "runpod"] && alltrue([for p in output.ui.status.platforms : p.serve == contains(output.platforms, p.id)])
+    error_message = "the Home page gets the image and every platform of deploy.yaml with its serve flag"
+  }
 }

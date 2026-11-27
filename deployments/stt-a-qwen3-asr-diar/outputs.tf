@@ -90,5 +90,7 @@ output "ui" {
     # 1 entry per platform: { id, label, base_url, cold_start }. All use retry-429: Vertex AI answers 429 at 0
     # replicas; the proxy answers 429 when Runpod or Modal sends no answer in 280 s (a container is starting).
     platforms = module.model.ui_platforms
+    # The Home page of the UI: the image and every platform of deploy.yaml with its serve flag.
+    status = module.model.ui_status
   }
 }

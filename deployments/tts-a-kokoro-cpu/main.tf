@@ -31,7 +31,7 @@ module "service" {
   region     = var.region
   name       = "tts-a-kokoro-cpu"
   # Pulled through the infra/core "ghcr" remote repo; ghcr.io/remsky/kokoro-fastapi-cpu has the model inside.
-  image              = "${var.region}-docker.pkg.dev/${var.project_id}/ghcr/remsky/kokoro-fastapi-cpu:v0.10.0"
+  image              = "${var.region}-docker.pkg.dev/${var.project_id}/ghcr/${local.image}"
   cpu                = "4"
   memory             = "8Gi"
   startup_probe_path = "/health"
@@ -39,4 +39,9 @@ module "service" {
   invokers = ["user:${var.invoker_email}", "serviceAccount:${local.gateway_sa}"]
 
   depends_on = [google_service_account.gateway]
+}
+
+locals {
+  # The Kokoro image in ghcr.io (the UI Home page shows it as the version).
+  image = "remsky/kokoro-fastapi-cpu:v0.10.0"
 }

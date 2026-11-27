@@ -50,5 +50,20 @@ class PlatformDeployed(unittest.TestCase):
             self.assertEqual(ui.platform_deployed(pathlib.Path("d"), {"vertex": self.T["vertex"]}), {"vertex": False})
 
 
+class StatusRow(unittest.TestCase):
+    M = {"id": "a", "title": "A", "type": "llm", "platforms": [{"id": "vertex"}]}
+
+    def test_states(self):
+        st = {"version": "img:1", "platforms": [{"id": "vertex", "serve": True}, {"id": "runpod", "serve": False}, {"id": "modal", "serve": True}, {"id": "x", "serve": True, "parked": True}]}
+        row = ui.status_row(self.M, st, {"vertex": False}, False)
+        self.assertEqual(row["version"], "img:1")
+        self.assertFalse(row["tab"])
+        self.assertEqual(row["platforms"], [{"id": "vertex", "state": "not deployed"}, {"id": "runpod", "state": "off"}, {"id": "modal", "state": "serving"}, {"id": "x", "state": "parked"}])
+
+    def test_without_status_uses_the_ui_platforms(self):
+        row = ui.status_row(self.M, None, {}, True)
+        self.assertEqual((row["version"], row["platforms"]), ("", [{"id": "vertex", "state": "serving"}]))
+
+
 if __name__ == "__main__":
     unittest.main()

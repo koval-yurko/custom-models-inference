@@ -1,6 +1,170 @@
-{"models":[
- {"id":"tts-mock","title":"TTS mock","type":"tts","base_url":"http://localhost:5181","model":"kokoro","features":{"stream":true,"voices":true,"default_voice":"af_heart","formats":["mp3","wav","pcm"],"sample_rate":24000}},
- {"id":"llm-mock","title":"LLM mock","type":"llm","base_url":"http://localhost:5181/vertex","model":"gemma-4-12b","features":{"stream":true,"max_tokens":1024},"platforms":[{"id":"vertex","label":"Vertex AI","base_url":"http://localhost:5181/vertex","cold_start":"retry-429"},{"id":"runpod","label":"Runpod","base_url":"http://localhost:5181/runpod","cold_start":"retry-429"}]},
- {"id":"llm-routes-mock","title":"LLM-B mock","type":"llm-routes","base_url":"http://localhost:5181","model":"qwen3.5-9b","features":{"cold_start":"vertex-429","max_tokens":512,"routes":["/extract","/generate"]}},
- {"id":"stt-mock","title":"STT-A mock","type":"stt","base_url":"http://localhost:5181/vertex","model":"qwen3-asr-diar","features":{"max_mb":20},"platforms":[{"id":"vertex","label":"Vertex AI","base_url":"http://localhost:5181/vertex","cold_start":"retry-429"},{"id":"runpod","label":"Runpod","base_url":"http://localhost:5181/runpod","cold_start":"retry-429"}]}
-]}
+{
+  "models": [
+    {
+      "id": "tts-mock",
+      "title": "TTS mock",
+      "type": "tts",
+      "base_url": "http://localhost:5181",
+      "model": "kokoro",
+      "features": {
+        "stream": true,
+        "voices": true,
+        "default_voice": "af_heart",
+        "formats": [
+          "mp3",
+          "wav",
+          "pcm"
+        ],
+        "sample_rate": 24000
+      }
+    },
+    {
+      "id": "llm-mock",
+      "title": "LLM mock",
+      "type": "llm",
+      "base_url": "http://localhost:5181/vertex",
+      "model": "gemma-4-12b",
+      "features": {
+        "stream": true,
+        "max_tokens": 1024
+      },
+      "platforms": [
+        {
+          "id": "vertex",
+          "label": "Vertex AI",
+          "base_url": "http://localhost:5181/vertex",
+          "cold_start": "retry-429"
+        },
+        {
+          "id": "runpod",
+          "label": "Runpod",
+          "base_url": "http://localhost:5181/runpod",
+          "cold_start": "retry-429"
+        }
+      ]
+    },
+    {
+      "id": "llm-routes-mock",
+      "title": "LLM-B mock",
+      "type": "llm-routes",
+      "base_url": "http://localhost:5181",
+      "model": "qwen3.5-9b",
+      "features": {
+        "cold_start": "vertex-429",
+        "max_tokens": 512,
+        "routes": [
+          "/extract",
+          "/generate"
+        ]
+      }
+    },
+    {
+      "id": "stt-mock",
+      "title": "STT-A mock",
+      "type": "stt",
+      "base_url": "http://localhost:5181/vertex",
+      "model": "qwen3-asr-diar",
+      "features": {
+        "max_mb": 20
+      },
+      "platforms": [
+        {
+          "id": "vertex",
+          "label": "Vertex AI",
+          "base_url": "http://localhost:5181/vertex",
+          "cold_start": "retry-429"
+        },
+        {
+          "id": "runpod",
+          "label": "Runpod",
+          "base_url": "http://localhost:5181/runpod",
+          "cold_start": "retry-429"
+        }
+      ]
+    }
+  ],
+  "generated_at": "2026-11-27T12:00:00Z",
+  "status": [
+    {
+      "id": "tts-mock",
+      "title": "TTS mock",
+      "type": "tts",
+      "version": "tts-mock:mock",
+      "tab": true,
+      "platforms": [
+        {
+          "id": "cloudrun",
+          "state": "serving"
+        },
+        {
+          "id": "modal",
+          "state": "off"
+        }
+      ]
+    },
+    {
+      "id": "llm-mock",
+      "title": "LLM mock",
+      "type": "llm",
+      "version": "llm-mock:mock",
+      "tab": true,
+      "platforms": [
+        {
+          "id": "vertex",
+          "state": "serving"
+        },
+        {
+          "id": "runpod",
+          "state": "serving"
+        }
+      ]
+    },
+    {
+      "id": "llm-routes-mock",
+      "title": "LLM-B mock",
+      "type": "llm-routes",
+      "version": "llm-routes-mock:mock",
+      "tab": true,
+      "platforms": [
+        {
+          "id": "cloudrun",
+          "state": "serving"
+        }
+      ]
+    },
+    {
+      "id": "stt-mock",
+      "title": "STT-A mock",
+      "type": "stt",
+      "version": "stt-mock:mock",
+      "tab": true,
+      "platforms": [
+        {
+          "id": "vertex",
+          "state": "serving"
+        },
+        {
+          "id": "runpod",
+          "state": "serving"
+        }
+      ]
+    },
+    {
+      "id": "gone-mock",
+      "title": "Mock without a tab",
+      "type": "llm",
+      "version": "gone:1",
+      "tab": false,
+      "platforms": [
+        {
+          "id": "vertex",
+          "state": "not deployed"
+        },
+        {
+          "id": "runpod",
+          "state": "off"
+        }
+      ]
+    }
+  ]
+}

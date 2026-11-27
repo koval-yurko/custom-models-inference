@@ -115,3 +115,12 @@ output "proxy_extra_invoker_count" {
   description = "Number of proxy_invokers that got run.invoker on the proxy (for tests)."
   value       = module.cors_proxy.extra_invoker_count
 }
+
+output "ui_status" {
+  description = "For the Home page of the test UI (scripts/ui-deploy.py): the image and every platform in platforms, with serve = false for a platform out of service and parked = true for a Runpod endpoint with workers_max = 0."
+  value = {
+    version = try(var.spec.image.own, null) != null ? var.spec.image.own : var.spec.image.stock
+    # parked: Runpod with workers_max = 0 serves no call (no worker can start), but its endpoint stays.
+    platforms = [for p in var.platforms : { id = p, serve = contains(local.serving, p), parked = p == "runpod" && try(var.platform_options.runpod.workers_max, 1) == 0 }]
+  }
+}

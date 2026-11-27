@@ -52,10 +52,57 @@ export function parseModels(json: unknown): ModelConfig[] {
   });
 }
 
-export async function loadModels(): Promise<ModelConfig[]> {
+/** State of 1 platform of a model on the Home page: serving, parked (Runpod workers_max 0), not deployed (no model on it),
+ * off (serve: false in deploy.yaml). */
+export type PlatformState = "serving" | "parked" | "not deployed" | "off";
+
+/** 1 row of the Home page table (models.json "status", written by scripts/ui-deploy.py). */
+export interface StatusRow {
+  id: string;
+  title: string;
+  type: string;
+  version: string; // image and tag, "" when the deployment is not applied with the status field yet
+  tab: boolean; // the UI has a tab for it
+  platforms: { id: string; state: PlatformState }[];
+}
+
+const STATES: PlatformState[] = ["serving", "parked", "not deployed", "off"];
+
+/** The "status" list of models.json. Missing (an old models.json): []. */
+export function parseStatus(json: unknown): StatusRow[] {
+  const list = (json as { status?: unknown })?.status;
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) throw new Error("models.json: status must be a list");
+  return list.map((r, i) => {
+    for (const k of ["id", "title", "type"]) {
+      if (typeof r?.[k] !== "string" || !r[k]) throw new Error(`models.json: status[${i}].${k} must be a non-empty string`);
+    }
+    if (!Array.isArray(r.platforms)) throw new Error(`models.json: status[${i}].platforms must be a list`);
+    const platforms = r.platforms.map((p: { id?: unknown; state?: unknown }, j: number) => {
+      if (typeof p?.id !== "string" || !STATES.includes(p.state as PlatformState))
+        throw new Error(`models.json: status[${i}].platforms[${j}] needs an id and a state (${STATES.join(", ")})`);
+      return { id: p.id, state: p.state as PlatformState };
+    });
+    return { id: r.id, title: r.title, type: r.type, version: typeof r.version === "string" ? r.version : "", tab: r.tab === true, platforms };
+  });
+}
+
+/** Display name of a platform id. An unknown id stays as it is. */
+export const platformLabel = (id: string) =>
+  ({ vertex: "Vertex AI", runpod: "Runpod", modal: "Modal", cloudrun: "Cloud Run" })[id] ?? id;
+
+export interface UiConfig {
+  models: ModelConfig[];
+  status: StatusRow[];
+  generatedAt?: string;
+}
+
+export async function loadModels(): Promise<UiConfig> {
   const r = await fetch("models.json", { cache: "no-store" });
   if (!r.ok) throw new Error(`models.json: HTTP ${r.status}. Run scripts/ui-deploy.py (or --local for dev).`);
-  return parseModels(await r.json());
+  const json = await r.json();
+  const at = (json as { generated_at?: unknown })?.generated_at;
+  return { models: parseModels(json), status: parseStatus(json), ...(typeof at === "string" ? { generatedAt: at } : {}) };
 }
 
 const KEY = "model-test-ui.api-key";

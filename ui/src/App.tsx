@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { PlatformPicker } from "./components";
-import { choosePlatform, getApiKey, hashPick, getPlatform, loadModels, parseHash, setApiKey, setPlatform, withPlatform, type ModelConfig } from "./config";
+import { choosePlatform, getApiKey, hashPick, getPlatform, loadModels, parseHash, setApiKey, setPlatform, withPlatform, type ModelConfig, type StatusRow } from "./config";
+import { Home } from "./Home";
 import { PANELS } from "./panels";
 
 export default function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
+  const [status, setStatus] = useState<StatusRow[]>([]);
+  const [generatedAt, setGeneratedAt] = useState<string>();
   const [error, setError] = useState<string>();
   const [hash, setHash] = useState(parseHash(location.hash));
   const active = hash.tab;
@@ -13,7 +16,7 @@ export default function App() {
   const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
-    loadModels().then(setModels, (e) => setError(String(e)));
+    loadModels().then((c) => (setModels(c.models), setStatus(c.status), setGeneratedAt(c.generatedAt)), (e) => setError(String(e)));
     const onHash = () => setHash(parseHash(location.hash));
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
@@ -25,7 +28,9 @@ export default function App() {
     if (p && picks[p.model] !== p.platform) (setPlatform(p.model, p.platform), setPicks((x) => ({ ...x, [p.model]: p.platform })));
   }, [models, hash]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const current = models.find((m) => m.id === active) ?? models[0];
+  // No tab in the hash (or #/home): the Home page. An unknown tab id falls back to the first tab.
+  const home = active === "" || active === "home";
+  const current = home ? undefined : (models.find((m) => m.id === active) ?? models[0]);
   const pick = (id: string, platform: string) => {
     setPlatform(id, platform);
     setPicks((p) => ({ ...p, [id]: platform }));
@@ -37,6 +42,9 @@ export default function App() {
       <header>
         <b className="brand">Model tests</b>
         <nav>
+          <a href="#/" className={home ? "active" : ""}>
+            Home
+          </a>
           {models.map((m) => (
             <a key={m.id} href={`#/${m.id}`} className={m === current ? "active" : ""}>
               {m.title}
@@ -59,6 +67,7 @@ export default function App() {
       <main>
         {error && <p className="error">{error}</p>}
         {!key && models.length > 0 && <p className="info">Enter the API key in the header (terraform output -raw api_key in infra/core).</p>}
+        {home && <Home rows={status} generatedAt={generatedAt} />}
         {/* Every panel stays mounted, so a tab keeps its chat and audio when you switch. */}
         {models.map((m) => {
           const Panel = PANELS[m.type];

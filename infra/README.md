@@ -552,6 +552,7 @@ A static React app (`ui/`) to test the models in a browser, also on a phone. It 
 
 - URL: `terraform -chdir=infra/core output -raw ui_url` (`https://storage.googleapis.com/<project_id>-ui/index.html`).
 - Tabs come from `models.json`. `scripts/ui-deploy.py` writes it from the `ui` output of each deployment. A deployment shows in the UI only after it is applied with a `ui` output.
+- The Home page (`#/`, the default) has 1 table: 1 row per model, 1 column per platform, the image version, and the state of each platform: Serving, Parked (Runpod `workers_max: 0`), Not deployed (no model on the platform), Out of service (`serve: false` in `deploy.yaml`). The data is `status` in `models.json`, from the `status` field of each `ui` output (module `model`: output `ui_status`). Run `ui-deploy.py` after each change, so the table is current.
 - A deployment on the `model` module lists its platforms in the `ui` output (`platforms = module.model.ui_platforms`). `ui-deploy.py` drops a platform that is not deployed (`scripts/deploy.py status`) and drops the tab when no platform is left. A tab with 2 or more platforms has a platform picker.
 - The gateway URL changes when Terraform or `scripts/gateway-streaming.py` replaces the gateway. Then run `./scripts/ui-deploy.py --config-only`.
 - To add a model, a feature or a new model type, use the `model-ui` skill (`.claude/skills/model-ui/SKILL.md`).
